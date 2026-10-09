@@ -1,10 +1,10 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { createApp } from './app.js';
 import { createDb } from './db/client.js';
-import { users } from './db/schema.js';
+import { departments, userRoles, users } from './db/schema.js';
 
 const { db } = createDb();
 
@@ -13,6 +13,26 @@ const app = createApp({
   findUser: async (email) =>
     (await db.select().from(users).where(eq(users.email, email)).limit(1))[0] ?? null,
   listUsers: () => db.select().from(users),
+  getOnboarding: async (userId) => {
+    const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const roles = await db
+      .select({
+        departmentId: userRoles.departmentId,
+        name: departments.name,
+        requiresAvailability: userRoles.requiresAvailability,
+      })
+      .from(userRoles)
+      .innerJoin(departments, eq(departments.id, userRoles.departmentId))
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.requiresAvailability, true)));
+    return { confirmedAt: u?.firstLoginConfirmedAt ?? null, roles };
+  },
+  confirmOnboarding: async (userId) => {
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ firstLoginConfirmedAt: now }).where(eq(users.id, userId));
+      await tx.update(userRoles).set({ confirmedAt: now }).where(eq(userRoles.userId, userId));
+    });
+  },
 });
 
 const root = new Hono();

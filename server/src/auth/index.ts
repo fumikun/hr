@@ -28,6 +28,7 @@ export function createAuthConfig(
   return {
     secret: env.AUTH_SECRET,
     basePath: '/api/auth',
+    pages: { signIn: '/login', error: '/login' },
     trustHost: true,
     providers,
     session: { strategy: 'jwt' },

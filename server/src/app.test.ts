@@ -14,8 +14,24 @@ const devEnv = {
   AUTH_URL: 'http://localhost:3000',
   AUTH_SECRET: 'test-secret',
 };
-const makeApp = (env: Record<string, string | undefined>) =>
-  createApp({ env, findUser, listUsers: () => Promise.resolve(all) });
+const confirmedAt = new Map<number, Date>();
+const makeApp = (env: Record<string, string | undefined>) => {
+  confirmedAt.clear();
+  return createApp({
+    env,
+    findUser,
+    listUsers: () => Promise.resolve(all),
+    getOnboarding: (id) =>
+      Promise.resolve({
+        confirmedAt: confirmedAt.get(id) ?? null,
+        roles: [{ departmentId: 1, name: '模擬店部', requiresAvailability: true }],
+      }),
+    confirmOnboarding: (id) => {
+      confirmedAt.set(id, new Date());
+      return Promise.resolve();
+    },
+  });
+};
 
 async function devLogin(app: ReturnType<typeof makeApp>, email: string) {
   const csrfRes = await app.request('/api/auth/csrf');
@@ -84,5 +100,30 @@ describe('dev login', () => {
     expect((await app.request('/api/dev/users')).status).toBe(404);
     const { cookie } = await devLogin(app, admin.email).catch(() => ({ cookie: '' }));
     expect((await app.request('/api/me', { headers: { cookie } })).status).toBe(401);
+  });
+});
+
+describe('onboarding (F-07)', () => {
+  it('requires login', async () => {
+    const app = makeApp(devEnv);
+    expect((await app.request('/api/me/onboarding')).status).toBe(401);
+    expect((await app.request('/api/app/ping')).status).toBe(401);
+  });
+  it('blocks business APIs until confirmed, then allows them', async () => {
+    const app = makeApp(devEnv);
+    const { cookie } = await devLogin(app, general.email);
+    const headers = { cookie };
+
+    const before = await app.request('/api/me/onboarding', { headers });
+    expect(await before.json()).toMatchObject({
+      confirmed: false,
+      roles: [{ name: '模擬店部' }],
+    });
+    expect((await app.request('/api/app/ping', { headers })).status).toBe(403);
+
+    const res = await app.request('/api/me/onboarding/confirm', { method: 'POST', headers });
+    expect(res.status).toBe(200);
+    expect(confirmedAt.has(general.id)).toBe(true);
+    expect((await app.request('/api/app/ping', { headers })).status).toBe(200);
   });
 });

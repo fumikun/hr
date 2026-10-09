@@ -1,16 +1,22 @@
 import { authHandler, initAuthConfig, verifyAuth } from '@hono/auth-js';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
+
+export type OnboardingRole = { departmentId: number; name: string; requiresAvailability: boolean };
+export type Onboarding = { confirmedAt: Date | null; roles: OnboardingRole[] };
 
 export type AppDeps = {
   env: Record<string, string | undefined>;
   findUser: FindUser;
   listUsers: () => Promise<AppUser[]>;
+  getOnboarding: (userId: number) => Promise<Onboarding>;
+  confirmOnboarding: (userId: number) => Promise<void>;
 };
 
-export function createApp({ env, findUser, listUsers }: AppDeps) {
+export function createApp({ env, findUser, listUsers, getOnboarding, confirmOnboarding }: AppDeps) {
   const app = new Hono();
   const authConfig = createAuthConfig(env, findUser);
 
@@ -32,6 +38,29 @@ export function createApp({ env, findUser, listUsers }: AppDeps) {
     );
   }
 
+  const sessionUserId = (c: Context): number =>
+    Number((c.get('authUser')?.session.user as { id?: number } | undefined)?.id);
+
   app.get('/api/me', verifyAuth(), (c) => c.json(c.get('authUser')?.session.user ?? null));
+
+  // 初回確認（F-07）: 確認済みになるまで、/api/me 系以外の業務 API を使わせない
+  app.get('/api/me/onboarding', verifyAuth(), async (c) => {
+    const { confirmedAt, roles } = await getOnboarding(sessionUserId(c));
+    return c.json({ confirmed: confirmedAt !== null, roles });
+  });
+  app.post('/api/me/onboarding/confirm', verifyAuth(), async (c) => {
+    await confirmOnboarding(sessionUserId(c));
+    return c.json({ confirmed: true });
+  });
+
+  const requireConfirmed = createMiddleware(async (c, next) => {
+    const { confirmedAt } = await getOnboarding(sessionUserId(c));
+    if (confirmedAt === null) return c.json({ error: 'onboarding_required' }, 403);
+    await next();
+  });
+  // 業務APIはここ以降に /api/app/* として載せる（認証＋初回確認が必須）
+  app.use('/api/app/*', verifyAuth(), requireConfirmed);
+  app.get('/api/app/ping', (c) => c.json({ pong: true }));
+
   return app;
 }
