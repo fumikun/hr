@@ -58,3 +58,12 @@
     @apply bg-muted/40 text-foreground;
   }
 }
+
+@media print {
+  body {
+    background: #fff;
+  }
+  @page {
+    margin: 12mm;
+  }
+}

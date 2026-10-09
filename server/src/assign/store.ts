@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from 'drizzle-orm';
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import type { createDb } from '../db/client.js';
 import {
   assignmentRuns,
@@ -11,7 +11,7 @@ import {
   userRoles,
   users,
 } from '../db/schema.js';
-import type { AssignStore, Run, RunSummary } from './types.js';
+import type { AssignStore, AuditStore, Run, RunSummary } from './types.js';
 
 type Db = ReturnType<typeof createDb>['db'];
 
@@ -25,8 +25,36 @@ const toRun = (r: typeof assignmentRuns.$inferSelect): Run => ({
   error: r.error,
 });
 
-export function createAssignStore(db: Db): AssignStore {
+export function createAssignStore(db: Db): AssignStore & AuditStore {
   return {
+    async listAudit(limit, before) {
+      const rows = await db
+        .select({ log: auditLogs, actorName: users.name })
+        .from(auditLogs)
+        .leftJoin(users, eq(users.id, auditLogs.actorId))
+        .where(before === undefined ? undefined : lt(auditLogs.id, before))
+        .orderBy(desc(auditLogs.id))
+        .limit(limit);
+      return rows.map(({ log, actorName }) => ({ ...log, actorName }));
+    },
+
+    setStatusAll: (status, actorId) =>
+      db.transaction(async (tx) => {
+        const from = status === 'confirmed' ? 'draft' : 'confirmed';
+        const rows = await tx
+          .update(assignments)
+          .set({ status })
+          .where(eq(assignments.status, from))
+          .returning({ userId: assignments.userId });
+        await tx.insert(auditLogs).values({
+          actorId,
+          action: status === 'confirmed' ? 'assign.confirm' : 'assign.unconfirm',
+          target: 'assignments',
+          after: { count: rows.length },
+        });
+        return rows.length;
+      }),
+
     async loadSolveInput() {
       const [us, roles, ps, members, slots, avs, locked] = await Promise.all([
         db.select().from(users),

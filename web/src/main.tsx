@@ -4,7 +4,9 @@ import { createBrowserRouter, redirect, RouterProvider } from 'react-router';
 import {
   adminApi,
   assignApi,
+  auditApi,
   availabilityApi,
+  fetchMyShifts,
   fetchMe,
   fetchOnboarding,
   periodApi,
@@ -13,6 +15,9 @@ import {
 } from './api';
 import './styles.css';
 import { Toaster } from '@/components/ui/sonner';
+import { AdminAudit } from './routes/AdminAudit';
+import { AdminPrint } from './routes/AdminPrint';
+import { MyShifts } from './routes/MyShifts';
 import { AdminAssign } from './routes/AdminAssign';
 import { AdminAvailability } from './routes/AdminAvailability';
 import { Availability } from './routes/Availability';
@@ -38,6 +43,38 @@ async function requireAdmin() {
 }
 
 const router = createBrowserRouter([
+  {
+    path: '/shifts',
+    element: <MyShifts />,
+    loader: async () => {
+      await requireUser();
+      if (!(await fetchOnboarding()).confirmed) throw redirect('/onboarding');
+      return fetchMyShifts();
+    },
+  },
+  {
+    path: '/admin/audit',
+    element: <AdminAudit />,
+    loader: async () => {
+      await requireAdmin();
+      return auditApi.list();
+    },
+  },
+  {
+    path: '/admin/print',
+    element: <AdminPrint />,
+    loader: async () => {
+      await requireAdmin();
+      const [departments, posts, slots, users, assign] = await Promise.all([
+        adminApi.departments(),
+        postApi.list(),
+        slotApi.list(),
+        adminApi.users(),
+        assignApi.data(),
+      ]);
+      return { departments, posts, slots, users, assign };
+    },
+  },
   {
     path: '/admin/assign',
     element: <AdminAssign />,

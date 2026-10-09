@@ -3,13 +3,13 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { findShortages, findViolations, ineligibleReason, overlaps, wantMs } from './model.js';
 import type { AssignRunner } from './runner.js';
-import type { AssignStore } from './types.js';
+import type { AssignStore, AuditStore } from './types.js';
 
 const pairBody = z.object({ userId: z.number().int(), slotId: z.number().int() });
 const runBody = z.object({ timeLimitSeconds: z.number().int().min(5).max(300).default(60) });
 
 export function assignRoutes(
-  store: AssignStore,
+  store: AssignStore & AuditStore,
   runner: AssignRunner,
   actorId: (c: Context) => number,
 ) {
@@ -23,6 +23,27 @@ export function assignRoutes(
         const run = await runner.start(actorId(c), c.req.valid('json'));
         return run ? c.json(run, 202) : c.json({ error: 'already_running' }, 409);
       })
+      // 下書きを確定する（確定後のみ一般ユーザーに公開）／確定を解除して下書きに戻す
+      .post('/assign/confirm', async (c) =>
+        c.json({ changed: await store.setStatusAll('confirmed', actorId(c)) }),
+      )
+      .post('/assign/unconfirm', async (c) =>
+        c.json({ changed: await store.setStatusAll('draft', actorId(c)) }),
+      )
+      .get(
+        '/audit',
+        zValidator(
+          'query',
+          z.object({
+            limit: z.coerce.number().int().min(1).max(200).default(50),
+            before: z.coerce.number().int().optional(),
+          }),
+        ),
+        async (c) => {
+          const { limit, before } = c.req.valid('query');
+          return c.json(await store.listAudit(limit, before));
+        },
+      )
       .get('/assign/run', async (c) => c.json(await store.latestRun()))
       // 現在の割り当て・不足枠・制約違反（手動修正後の警告にも使う）
       .get('/assign', async (c) => {

@@ -5,6 +5,7 @@ import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
 import { availabilityUserRoutes } from './availability/routes.js';
+import { myShiftRoutes } from './assign/myShifts.js';
 import { createAssignRunner } from './assign/runner.js';
 import { solveInWorker, type Solver } from './assign/workerSolver.js';
 import { adminRoutes } from './admin/routes.js';
@@ -79,6 +80,7 @@ export function createApp({
   app.use('/api/app/*', verifyAuth(), requireConfirmed);
   app.get('/api/app/ping', (c) => c.json({ pong: true }));
   app.route('/api/app', availabilityUserRoutes(adminStore, sessionUserId));
+  app.route('/api/app', myShiftRoutes(adminStore, sessionUserId));
 
   // 管理者API: 権限判定はすべてサーバー側（セッションの isAdmin は JWT 更新のたびに DB から取り直す）
   const requireAdmin = createMiddleware(async (c, next) => {

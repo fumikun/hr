@@ -117,6 +117,12 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
     },
     latestRun: () => Promise.resolve(runs.length ? { ...runs[runs.length - 1]! } : null),
     failStaleRuns: () => Promise.resolve(),
+    listAudit: () => Promise.resolve([]),
+    setStatusAll: (status: 'draft' | 'confirmed') => {
+      const target = assignments.filter((a) => a.status !== status);
+      for (const a of target) a.status = status;
+      return Promise.resolve(target.length);
+    },
     posts,
     listPosts: (dept) =>
       Promise.resolve(posts.filter((p) => dept === undefined || p.departmentId === dept)),

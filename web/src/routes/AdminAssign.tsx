@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   assignApi,
   candidatesApi,
+  confirmApi,
   type AdminUser,
   type AssignData,
   type AssignRun,
@@ -264,6 +265,68 @@ function AddDialog({
   );
 }
 
+function ConfirmPanel({ assign, onChanged }: { assign: AssignData; onChanged: () => void }) {
+  const drafts = assign.assignments.filter((a) => a.status === 'draft').length;
+  const confirmed = assign.assignments.length - drafts;
+  const [error, setError] = useState('');
+
+  async function confirm() {
+    const warn = [
+      assign.shortages.length > 0 && `不足している枠が ${assign.shortages.length} 件`,
+      assign.violations.length > 0 && `制約違反の警告が ${assign.violations.length} 件`,
+    ].filter(Boolean);
+    const msg = `下書き ${drafts} 件を確定し、一般ユーザーに公開します。${
+      warn.length ? `\n\n注意: ${warn.join('、')}あります。` : ''
+    }\n\n確定後も「確定を解除」で下書きに戻せます。`;
+    if (!window.confirm(msg)) return;
+    try {
+      setError('');
+      await confirmApi.confirm();
+      toast.success('シフトを確定しました');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+  async function unconfirm() {
+    if (
+      !window.confirm(
+        '確定を解除すると、一般ユーザーからシフトが見えなくなります。よろしいですか？',
+      )
+    )
+      return;
+    try {
+      setError('');
+      await confirmApi.unconfirm();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>確定・公開</CardTitle>
+        <CardDescription>
+          確定した割り当ては一般ユーザーが「自分のシフト」で見られます。確定済みは再実行でも動きません。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-3">
+        <Badge variant="secondary">下書き {drafts} 件</Badge>
+        <Badge variant={confirmed > 0 ? 'default' : 'secondary'}>確定済み {confirmed} 件</Badge>
+        <Button disabled={drafts === 0} onClick={() => void confirm()}>
+          下書きを確定する
+        </Button>
+        <Button variant="outline" disabled={confirmed === 0} onClick={() => void unconfirm()}>
+          確定を解除
+        </Button>
+        {error && <ErrorAlert>{error}</ErrorAlert>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminAssign() {
   const { departments, posts, slots, users, assign, run } = useLoaderData<AdminAssignData>();
   const { revalidate } = useRevalidator();
@@ -315,6 +378,8 @@ export function AdminAssign() {
     <Page wide back>
       <h1 className="text-2xl font-bold">自動割り当て・手動修正</h1>
       <RunPanel run={run} onFinished={refresh} />
+
+      <ConfirmPanel assign={assign} onChanged={refresh} />
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant={shortageTotal > 0 ? 'destructive' : 'secondary'}>
@@ -425,6 +490,11 @@ export function AdminAssign() {
                                     <span className="truncate">
                                       {userById.get(a.userId)?.name ?? '?'}
                                     </span>
+                                    {a.status === 'confirmed' && (
+                                      <Badge variant="secondary" className="ml-1">
+                                        確定
+                                      </Badge>
+                                    )}
                                     {a.source === 'manual' && (
                                       <span className="text-muted-foreground ml-1 text-xs">
                                         手動

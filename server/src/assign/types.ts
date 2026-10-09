@@ -78,6 +78,8 @@ export interface AssignStore {
   addManual(pair: Pair, actorId: number): Promise<'ok' | 'exists'>;
   removeAssignment(pair: Pair, actorId: number): Promise<'ok' | 'not_found' | 'confirmed'>;
   setLocked(pair: Pair, locked: boolean, actorId: number): Promise<boolean>;
+  /** 下書き⇔確定を一括で切り替える。変更した件数を返す */
+  setStatusAll(status: 'draft' | 'confirmed', actorId: number): Promise<number>;
   createRun(actorId: number, options: SolveOptions): Promise<Run | null>;
   updateRun(
     id: number,
@@ -86,4 +88,19 @@ export interface AssignStore {
   latestRun(): Promise<Run | null>;
   /** 再起動で取り残された running を failed にする */
   failStaleRuns(): Promise<void>;
+}
+
+export type AuditRow = {
+  id: number;
+  actorId: number | null;
+  actorName: string | null;
+  action: string;
+  target: string | null;
+  before: unknown;
+  after: unknown;
+  createdAt: Date;
+};
+export interface AuditStore {
+  /** 新しい順。before を指定するとその id より古いものを返す */
+  listAudit(limit: number, before?: number): Promise<AuditRow[]>;
 }

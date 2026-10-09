@@ -1,4 +1,4 @@
-import type { AssignStore } from '../assign/types.js';
+import type { AssignStore, AuditStore } from '../assign/types.js';
 import type { AvailabilityStore } from '../availability/types.js';
 
 export type Department = { id: number; name: string };
@@ -13,7 +13,8 @@ export type UserInput = {
 };
 export type AdminUser = UserInput & { id: number };
 
-export interface AdminStore extends SlotStore, PostStore, AvailabilityStore, AssignStore {
+export interface AdminStore
+  extends SlotStore, PostStore, AvailabilityStore, AssignStore, AuditStore {
   listUsers(): Promise<AdminUser[]>;
   listDepartments(): Promise<Department[]>;
   /** メールが既に登録済みなら null */

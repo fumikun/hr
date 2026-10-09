@@ -263,3 +263,36 @@ export type Candidate = {
 };
 export const candidatesApi = (slotId: number) =>
   adminFetch<Candidate[]>(`/assign/candidates/${slotId}`);
+
+export const confirmApi = {
+  confirm: () => adminFetch<{ changed: number }>('/assign/confirm', 'POST'),
+  unconfirm: () => adminFetch<{ changed: number }>('/assign/unconfirm', 'POST'),
+};
+
+export type AuditRow = {
+  id: number;
+  actorId: number | null;
+  actorName: string | null;
+  action: string;
+  target: string | null;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+};
+export const auditApi = {
+  list: (before?: number) =>
+    adminFetch<AuditRow[]>(`/audit?limit=50${before ? `&before=${before}` : ''}`),
+};
+
+export type MyShift = {
+  slotId: number;
+  startsAt: string;
+  endsAt: string;
+  department: string;
+  post: string;
+};
+export async function fetchMyShifts(): Promise<MyShift[]> {
+  const res = await fetch('/api/app/shifts');
+  if (!res.ok) throw new Error(`シフトの取得に失敗しました (${res.status})`);
+  return ((await res.json()) as { shifts: MyShift[] }).shifts;
+}

@@ -16,6 +16,9 @@ export function Home() {
           <Button asChild>
             <Link to="/availability">シフト希望を入力する</Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link to="/shifts">自分のシフトを見る</Link>
+          </Button>
           {me.isAdmin && (
             <nav className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
@@ -28,12 +31,18 @@ export function Home() {
                 <Link to="/admin/assign">自動割り当て・手動修正</Link>
               </Button>
               <Button asChild variant="outline">
+                <Link to="/admin/print">印刷・出力</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/admin/audit">操作履歴</Link>
+              </Button>
+              <Button asChild variant="outline">
                 <Link to="/admin/slots">部門・シフト枠設定</Link>
               </Button>
             </nav>
           )}
           <p className="text-muted-foreground text-sm">
-            自分のシフト確認の画面はこれから実装します。
+            確定したシフトは「自分のシフトを見る」から確認できます。
           </p>
         </CardContent>
       </Card>

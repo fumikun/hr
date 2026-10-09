@@ -564,6 +564,56 @@ describe('admin API', () => {
       });
     });
 
+    it('publishes only confirmed shifts to the user, and confirmed ones survive a re-run', async () => {
+      const app = makeApp(devEnv);
+      const adminCookie = await loginConfirmed(app, admin.email);
+      seed();
+      store.users.push({
+        ...newUser,
+        id: general.id,
+        email: general.email,
+        roles: [{ departmentId: 1, requiresAvailability: true }],
+      });
+      store.assignments.push({
+        userId: general.id,
+        slotId: 1,
+        source: 'auto',
+        locked: false,
+        status: 'draft',
+      });
+      const userCookie = await loginConfirmed(app, general.email);
+      const mine = async () =>
+        (
+          (await (
+            await app.request('/api/app/shifts', { headers: { cookie: userCookie } })
+          ).json()) as {
+            shifts: { slotId: number; post: string }[];
+          }
+        ).shifts;
+
+      expect(await mine()).toEqual([]); // 下書きは見えない
+      const confirmed = await app.request('/api/admin/assign/confirm', json(adminCookie, 'POST'));
+      expect(await confirmed.json()).toEqual({ changed: 1 });
+      expect(await mine()).toMatchObject([{ slotId: 1, post: '全体' }]);
+
+      // 確定済みは再実行や削除では動かない
+      await app.request('/api/admin/assign/run', json(adminCookie, 'POST', {}));
+      await finish(app, adminCookie);
+      expect(await mine()).toHaveLength(1);
+      const del = await app.request(
+        `/api/admin/assign/assignments/${general.id}/1`,
+        json(adminCookie, 'DELETE'),
+      );
+      expect(del.status).toBe(409);
+
+      await app.request('/api/admin/assign/unconfirm', json(adminCookie, 'POST'));
+      expect(await mine()).toEqual([]);
+      // 一般ユーザーは確定操作できない
+      expect(
+        (await app.request('/api/admin/assign/confirm', json(userCookie, 'POST'))).status,
+      ).toBe(403);
+    });
+
     it('warns on rule-breaking manual edits but still allows them', async () => {
       const app = makeApp(devEnv);
       const cookie = await loginConfirmed(app, admin.email);

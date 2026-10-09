@@ -14,7 +14,7 @@ export function Page({
   return (
     <main className={cn('mx-auto w-full space-y-4 px-4 py-8', wide ? 'max-w-5xl' : 'max-w-md')}>
       {back && (
-        <Link to="/" className="text-muted-foreground text-sm hover:underline">
+        <Link to="/" className="text-muted-foreground text-sm hover:underline print:hidden">
           ← ホーム
         </Link>
       )}
