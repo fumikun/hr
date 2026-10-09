@@ -1,7 +1,19 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { app } from './app.js';
+import { createApp } from './app.js';
+import { createDb } from './db/client.js';
+import { users } from './db/schema.js';
+
+const { db } = createDb();
+
+const app = createApp({
+  env: process.env,
+  findUser: async (email) =>
+    (await db.select().from(users).where(eq(users.email, email)).limit(1))[0] ?? null,
+  listUsers: () => db.select().from(users),
+});
 
 const root = new Hono();
 root.route('/', app);

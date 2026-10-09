@@ -3,15 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx --env-file-if-exists=../.env.local watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:migrate": "tsx --env-file-if-exists=../.env.local src/db/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=../.env.local src/db/seed.ts"
   },
   "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@hono/auth-js": "^1.1.1",
     "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.4.0",
     "drizzle-orm": "^0.44.0",
