@@ -1,26 +1,58 @@
-export type Me = { id: number; email: string; name: string; isAdmin: boolean };
+/** HTTP ステータス付きのエラー。401 はログイン画面へ、403 は権限エラー表示に使う */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
+
+export type Me = {
+  id: number;
+  email: string;
+  name: string;
+  isAdmin: boolean;
+  /** 初回確認が済んでいるか（/api/me が一緒に返すので、確認のために別の通信は要らない） */
+  confirmed: boolean;
+};
 export type Onboarding = {
   confirmed: boolean;
   roles: { departmentId: number; name: string; requiresAvailability: boolean }[];
 };
-export type DevUser = Me;
+export type DevUser = Omit<Me, 'confirmed'>;
 
-export async function fetchMe(): Promise<Me | null> {
-  const res = await fetch('/api/me');
-  if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`/api/me failed: ${res.status}`);
-  return (await res.json()) as Me;
+// 画面遷移では複数のローダーが同時に「ログイン中か」を確認するので、短時間は1回の通信を共有する
+let meCache: { at: number; promise: Promise<Me | null> } | null = null;
+const ME_TTL_MS = 3000;
+export const forgetMe = () => {
+  meCache = null;
+};
+
+export function fetchMe(): Promise<Me | null> {
+  if (meCache && Date.now() - meCache.at < ME_TTL_MS) return meCache.promise;
+  const promise = (async () => {
+    const res = await fetch('/api/me');
+    if (res.status === 401) return null;
+    if (!res.ok) throw new ApiError('ユーザー情報を取得できませんでした', res.status);
+    return (await res.json()) as Me;
+  })();
+  meCache = { at: Date.now(), promise };
+  // 失敗した結果は共有しない（次の操作でやり直せるように）
+  promise.catch(forgetMe);
+  return promise;
 }
 
 export async function fetchOnboarding(): Promise<Onboarding> {
   const res = await fetch('/api/me/onboarding');
-  if (!res.ok) throw new Error(`/api/me/onboarding failed: ${res.status}`);
+  if (!res.ok) throw new ApiError('確認状況を取得できませんでした', res.status);
   return (await res.json()) as Onboarding;
 }
 
 export async function confirmOnboarding(): Promise<void> {
+  forgetMe();
   const res = await fetch('/api/me/onboarding/confirm', { method: 'POST' });
-  if (!res.ok) throw new Error(`confirm failed: ${res.status}`);
+  if (!res.ok) throw new ApiError('確認を保存できませんでした。もう一度お試しください', res.status);
 }
 
 // 開発用ログインが無効（本番）の場合は 404 になるので null を返す
@@ -78,7 +110,10 @@ async function adminFetch<T>(path: string, method = 'GET', body?: unknown): Prom
   if (res.ok) return (await res.json()) as T;
   const data = (await res.json().catch(() => ({}))) as { error?: string; errors?: CsvError[] };
   if (data.errors) throw new CsvImportError(data.errors);
-  throw new Error(ERROR_TEXT[data.error ?? ''] ?? `エラーが発生しました (${res.status})`);
+  throw new ApiError(
+    ERROR_TEXT[data.error ?? ''] ?? `エラーが発生しました (${res.status})`,
+    res.status,
+  );
 }
 
 export class CsvImportError extends Error {
@@ -94,10 +129,14 @@ export const adminApi = {
   updateUser: (id: number, u: UserInput) => adminFetch<AdminUser>(`/users/${id}`, 'PUT', u),
   deleteUser: (id: number) => adminFetch<{ ok: true }>(`/users/${id}`, 'DELETE'),
   importCsv: (csv: string, dryRun: boolean) =>
-    adminFetch<{ valid: number } | { created: number; updated: number }>('/users/import', 'POST', {
-      csv,
-      dryRun,
-    }),
+    adminFetch<{ valid: number; preview: UserInput[] } | { created: number; updated: number }>(
+      '/users/import',
+      'POST',
+      {
+        csv,
+        dryRun,
+      },
+    ),
 };
 
 export type Post = {
@@ -182,7 +221,7 @@ Object.assign(ERROR_TEXT, { period_closed: '受付期間外のため保存でき
 export const availabilityApi = {
   get: async () => {
     const res = await fetch('/api/app/availability');
-    if (!res.ok) throw new Error(`希望の取得に失敗しました (${res.status})`);
+    if (!res.ok) throw new ApiError(`希望の取得に失敗しました (${res.status})`, res.status);
     return (await res.json()) as AvailabilityData;
   },
   save: async (entries: AvailabilityEntryDto[]) => {
@@ -193,7 +232,10 @@ export const availabilityApi = {
     });
     if (res.ok) return;
     const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(ERROR_TEXT[data.error ?? ''] ?? `保存に失敗しました (${res.status})`);
+    throw new ApiError(
+      ERROR_TEXT[data.error ?? ''] ?? `保存に失敗しました (${res.status})`,
+      res.status,
+    );
   },
 };
 
@@ -279,9 +321,25 @@ export type AuditRow = {
   after: unknown;
   createdAt: string;
 };
+export type AuditQuery = {
+  before?: number;
+  limit?: number;
+  actor?: number;
+  /** 操作名の先頭一致（例: assign.） */
+  action?: string;
+  from?: string;
+  to?: string;
+};
 export const auditApi = {
-  list: (before?: number) =>
-    adminFetch<AuditRow[]>(`/audit?limit=50${before ? `&before=${before}` : ''}`),
+  list: (opts: AuditQuery = {}) => {
+    const params = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.before) params.set('before', String(opts.before));
+    if (opts.actor) params.set('actor', String(opts.actor));
+    if (opts.action) params.set('action', opts.action);
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
+    return adminFetch<AuditRow[]>(`/audit?${params}`);
+  },
 };
 
 export type MyShift = {
@@ -291,10 +349,11 @@ export type MyShift = {
   department: string;
   post: string;
 };
-export async function fetchMyShifts(): Promise<MyShift[]> {
+export type MyShifts = { shifts: MyShift[]; publishedAt: string | null };
+export async function fetchMyShifts(): Promise<MyShifts> {
   const res = await fetch('/api/app/shifts');
-  if (!res.ok) throw new Error(`シフトの取得に失敗しました (${res.status})`);
-  return ((await res.json()) as { shifts: MyShift[] }).shifts;
+  if (!res.ok) throw new ApiError(`シフトの取得に失敗しました (${res.status})`, res.status);
+  return (await res.json()) as MyShifts;
 }
 
 Object.assign(ERROR_TEXT, { in_use: '所属者または枠がある部門は削除できません' });

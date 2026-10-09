@@ -29,6 +29,6 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
-  { files: ['*.js', '*.config.ts'], ...tseslint.configs.disableTypeChecked },
+  { files: ['*.js', '*.config.ts', 'scripts/**/*.mjs'], ...tseslint.configs.disableTypeChecked },
   prettier,
 );

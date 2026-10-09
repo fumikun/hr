@@ -9,6 +9,13 @@ export function Login() {
   const [params] = useSearchParams();
   const [devUsers, setDevUsers] = useState<DevUser[] | null>(null);
   const error = params.get('error');
+  // Auth.js のエラーコードを、利用者が次に何をすればよいかが分かる文言にする
+  const errorText =
+    error === 'AccessDenied'
+      ? 'このアカウントは登録されていません。ログインに使ったアカウントが、登録されたメールアドレスか確認してください。分からない場合は管理者に連絡してください。'
+      : error === 'Configuration'
+        ? 'ログインの設定に問題があります。管理者に連絡してください。'
+        : 'ログインできませんでした。もう一度お試しください。';
 
   useEffect(() => {
     void fetchDevUsers().then(setDevUsers);
@@ -21,11 +28,7 @@ export function Login() {
           <CardTitle className="text-xl">高専祭 シフト調整</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {error && (
-            <ErrorAlert>
-              ログインできませんでした。登録されたアカウントか確認してください。
-            </ErrorAlert>
-          )}
+          {error && <ErrorAlert>{errorText}</ErrorAlert>}
           {devUsers ? (
             <>
               <h2 className="font-medium">テストアカウントでログイン</h2>

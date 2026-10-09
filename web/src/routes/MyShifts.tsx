@@ -1,49 +1,74 @@
+import { CalendarPlus } from 'lucide-react';
 import { useLoaderData } from 'react-router';
-import type { MyShift } from '../api';
-import { Page } from '@/components/Page';
+import type { MyShifts as MyShiftsData } from '../api';
+import { buildIcs, downloadText } from '../lib/ics';
+import { Notice, Page } from '@/components/Page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-
-const pad = (n: number) => String(n).padStart(2, '0');
-const hm = (iso: string) => {
-  const d = new Date(iso);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-const dayLabel = (iso: string) =>
-  new Date(iso).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' });
+import { dateKey, hm, hoursLabel, md, mdhm, minutesBetween } from '@/lib/datetime';
+import { cn } from '@/lib/utils';
 
 export function MyShifts() {
-  const shifts = useLoaderData<MyShift[]>();
-  const days = [...new Set(shifts.map((s) => dayLabel(s.startsAt)))];
-  const totalMin = shifts.reduce(
-    (n, s) => n + (new Date(s.endsAt).getTime() - new Date(s.startsAt).getTime()) / 60_000,
-    0,
-  );
+  const { shifts, publishedAt } = useLoaderData<MyShiftsData>();
+  const now = Date.now();
+  const isPast = (s: { endsAt: string }) => new Date(s.endsAt).getTime() <= now;
+  const next = shifts.find((s) => !isPast(s));
+  const days = [...new Set(shifts.map((s) => dateKey(s.startsAt)))];
+  const totalMin = shifts.reduce((n, s) => n + minutesBetween(s.startsAt, s.endsAt), 0);
 
   return (
     <Page>
-      <h1 className="text-2xl font-bold">自分のシフト</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">自分のシフト</h1>
+        {shifts.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => downloadText('my-shifts.ics', buildIcs(shifts), 'text/calendar')}
+          >
+            <CalendarPlus className="size-4" aria-hidden />
+            カレンダーに追加
+          </Button>
+        )}
+      </div>
       {shifts.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-6 text-center text-sm">
+        <Notice kind="info">
           確定したシフトはまだありません。確定されるとここに表示されます。
-        </p>
+        </Notice>
       ) : (
         <>
           <p className="text-muted-foreground text-sm">
-            合計 {shifts.length} 枠 ／ {Math.round((totalMin / 60) * 10) / 10} 時間
+            合計 {shifts.length} 枠 ／ {hoursLabel(totalMin)}
+            {publishedAt && ` 最終更新: ${mdhm(publishedAt)}`}
           </p>
+          {next && (
+            <Notice kind="info" title="次のシフト">
+              {md(next.startsAt)} {hm(next.startsAt)}–{hm(next.endsAt)} {next.department}（
+              {next.post}）
+            </Notice>
+          )}
           {days.map((day) => (
             <Card key={day} className="gap-2 py-4">
               <CardHeader className="px-4">
-                <CardTitle className="text-base">{day}</CardTitle>
+                <CardTitle className="text-base">{md(day)}</CardTitle>
               </CardHeader>
               <CardContent className="px-4">
                 <ul className="divide-y">
                   {shifts
-                    .filter((s) => dayLabel(s.startsAt) === day)
+                    .filter((s) => dateKey(s.startsAt) === day)
                     .map((s) => (
-                      <li key={s.slotId} className="flex items-center justify-between py-2">
-                        <span className="text-lg font-medium tabular-nums">
+                      <li
+                        key={s.slotId}
+                        className={cn(
+                          'flex items-center justify-between py-2',
+                          isPast(s) && 'opacity-50',
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-lg font-medium tabular-nums">
                           {hm(s.startsAt)}–{hm(s.endsAt)}
+                          {s === next && <Badge>次</Badge>}
+                          {isPast(s) && <Badge variant="outline">終了</Badge>}
                         </span>
                         <span className="text-right text-sm">
                           {s.department}

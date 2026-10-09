@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { postApi, type AdminUser, type Post } from '../api';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { ErrorAlert } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAction } from '@/lib/useAction';
 
 function PostForm({
   initial,
@@ -31,20 +33,23 @@ function PostForm({
   const [restricted, setRestricted] = useState(initial.restricted);
   const [members, setMembers] = useState(new Set(initial.memberIds));
   const [query, setQuery] = useState('');
-  const [error, setError] = useState('');
+  const [localError, setLocalError] = useState('');
+  const { run, pending, error: actionError } = useAction();
+  const confirm = useConfirm();
+  const error = localError || actionError;
   const shown = useMemo(
     () => candidates.filter((u) => u.name.includes(query) || u.email.includes(query)),
     [candidates, query],
   );
 
-  async function run(fn: () => Promise<unknown>) {
-    try {
-      setError('');
-      await fn();
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+  async function del() {
+    const ok = await confirm({
+      title: 'この持ち場を削除しますか？',
+      description: '枠が残っている持ち場は削除できません。',
+      confirmLabel: '削除',
+      destructive: true,
+    });
+    if (ok) await run(remove!, { success: '持ち場を削除しました', onSuccess: onDone });
   }
   const toggle = (id: number, on: boolean) =>
     setMembers((prev) => {
@@ -59,8 +64,13 @@ function PostForm({
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (restricted && members.size === 0) return setError('入れる人を1人以上選んでください');
-        void run(() => save({ name, restricted, memberIds: restricted ? [...members] : [] }));
+        if (restricted && members.size === 0)
+          return setLocalError('入れる人を1人以上選んでください');
+        setLocalError('');
+        void run(() => save({ name, restricted, memberIds: restricted ? [...members] : [] }), {
+          success: '持ち場を保存しました',
+          onSuccess: onDone,
+        });
       }}
     >
       <div className="grid gap-1.5">
@@ -131,12 +141,15 @@ function PostForm({
             type="button"
             variant="destructive"
             className="mr-auto"
-            onClick={() => window.confirm('この持ち場を削除しますか？') && void run(remove)}
+            disabled={pending}
+            onClick={() => void del()}
           >
             削除
           </Button>
         )}
-        <Button type="submit">保存</Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? '保存中…' : '保存'}
+        </Button>
       </div>
     </form>
   );

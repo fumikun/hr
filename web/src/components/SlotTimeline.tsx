@@ -38,6 +38,7 @@ export function SlotTimeline({
   endHour,
   hourPx,
   selectedId,
+  touchEdit,
   onCreate,
   onSelect,
   onChange,
@@ -49,6 +50,8 @@ export function SlotTimeline({
   endHour: number;
   hourPx: number;
   selectedId: number | null;
+  /** true: 指でのドラッグで枠を作る・動かす（スクロールは止まる）。false: 指のドラッグはスクロール、タップで枠を追加 */
+  touchEdit: boolean;
   onCreate: (postId: number, startMin: number, endMin: number) => void;
   onSelect: (slot: Slot) => void;
   onChange: (slot: Slot, startMin: number, endMin: number) => void;
@@ -175,7 +178,7 @@ export function SlotTimeline({
               </div>
               <div
                 data-row
-                className="relative h-14 cursor-crosshair"
+                className={cn('relative h-14 cursor-crosshair', touchEdit && 'touch-none')}
                 style={{
                   width: hours.length * hourPx,
                   // 1時間ごとの線 + 15分ごとの線 + 5分ごとの細線
@@ -216,11 +219,11 @@ export function SlotTimeline({
                       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelect(s)}
                     >
                       <div
-                        className="absolute inset-y-0 left-0 w-2 cursor-ew-resize"
+                        className="absolute inset-y-0 left-0 w-3 cursor-ew-resize"
                         onPointerDown={(e) => startSlotDrag(e, s, 'left')}
                       />
                       <div
-                        className="absolute inset-y-0 right-0 w-2 cursor-ew-resize"
+                        className="absolute inset-y-0 right-0 w-3 cursor-ew-resize"
                         onPointerDown={(e) => startSlotDrag(e, s, 'right')}
                       />
                       <div className="pointer-events-none truncate font-medium">

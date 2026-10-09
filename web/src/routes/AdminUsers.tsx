@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLoaderData, useRevalidator } from 'react-router';
 import {
   adminApi,
@@ -8,7 +8,9 @@ import {
   type Department,
   type UserInput,
 } from '../api';
-import { ErrorAlert, Page } from '@/components/Page';
+import { downloadText } from '../lib/ics';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { ErrorAlert, Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -22,6 +24,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Table,
   TableBody,
   TableCell,
@@ -30,6 +39,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { useAction } from '@/lib/useAction';
+import { useQueryParam } from '@/lib/useQueryParam';
 
 export type AdminUsersData = { users: AdminUser[]; departments: Department[] };
 
@@ -52,18 +63,21 @@ function UserForm({
   onSaved,
   onCancel,
   save,
+  remove,
 }: {
   initial: UserInput;
   departments: Department[];
   onSaved: () => void;
   onCancel: () => void;
   save: (u: UserInput) => Promise<unknown>;
+  remove?: () => Promise<unknown>;
 }) {
   const [u, setU] = useState(initial);
   const [target, setTarget] = useState(toHours(initial.targetMinutes));
   const [max, setMax] = useState(toHours(initial.maxMinutes));
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const { run, pending, error } = useAction();
+  const confirm = useConfirm();
 
   const role = (id: number) => u.roles.find((r) => r.departmentId === id);
   const toggleDept = (id: number, on: boolean) =>
@@ -79,28 +93,32 @@ function UserForm({
       roles: u.roles.map((r) => (r.departmentId === id ? { ...r, requiresAvailability: v } : r)),
     });
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault();
     const targetMinutes = fromHours(target);
     const maxMinutes = fromHours(max);
     if ([targetMinutes, maxMinutes].some((v) => v !== null && (!Number.isFinite(v) || v < 0)))
-      return setError('勤務時間は0以上の数値で入力してください');
+      return setLocalError('勤務時間は0以上の数値で入力してください');
     if (targetMinutes !== null && maxMinutes !== null && maxMinutes < targetMinutes)
-      return setError('上限は目標以上にしてください');
-    setBusy(true);
-    setError('');
-    try {
-      await save({ ...u, targetMinutes, maxMinutes });
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+      return setLocalError('上限は目標以上にしてください');
+    setLocalError('');
+    void run(() => save({ ...u, targetMinutes, maxMinutes }), {
+      success: '保存しました',
+      onSuccess: onSaved,
+    });
+  }
+  async function del() {
+    const ok = await confirm({
+      title: `${initial.name}さんを削除しますか？`,
+      description: '本人の希望入力と割り当ても一緒に消えます。この操作は元に戻せません。',
+      confirmLabel: '削除',
+      destructive: true,
+    });
+    if (ok) await run(remove!, { success: '削除しました', onSuccess: onSaved });
   }
 
   return (
-    <form className="space-y-4" onSubmit={(e) => void submit(e)}>
+    <form className="space-y-4" onSubmit={submit}>
       <div className="grid gap-1.5">
         <Label htmlFor="u-email">メールアドレス</Label>
         <Input
@@ -175,111 +193,275 @@ function UserForm({
           </div>
         ))}
       </fieldset>
-      {error && <ErrorAlert>{error}</ErrorAlert>}
+      {(localError || error) && <ErrorAlert>{localError || error}</ErrorAlert>}
       <div className="flex justify-end gap-2">
+        {remove && (
+          <Button
+            type="button"
+            variant="destructive"
+            className="mr-auto"
+            disabled={pending}
+            onClick={() => void del()}
+          >
+            このユーザーを削除
+          </Button>
+        )}
         <Button type="button" variant="outline" onClick={onCancel}>
           キャンセル
         </Button>
-        <Button type="submit" disabled={busy}>
-          保存
+        <Button type="submit" disabled={pending}>
+          {pending ? '保存中…' : '保存'}
         </Button>
       </div>
     </form>
   );
 }
 
-function CsvImport({ onDone }: { onDone: () => void }) {
+function CsvDialog({
+  open,
+  onOpenChange,
+  departments,
+  onDone,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  departments: Department[];
+  onDone: () => void;
+}) {
   const [csv, setCsv] = useState('');
   const [errors, setErrors] = useState<CsvError[]>([]);
-  const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<UserInput[] | null>(null);
+  const { run, pending, error } = useAction();
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '?';
 
-  async function run(dryRun: boolean) {
-    setBusy(true);
+  const check = async () => {
     setErrors([]);
-    setMessage('');
-    try {
-      const res = await adminApi.importCsv(csv, dryRun);
-      if ('valid' in res) setMessage(`${res.valid} 件を取り込めます（まだ登録していません）`);
-      else {
-        setMessage(`登録しました（新規 ${res.created} 件、更新 ${res.updated} 件）`);
-        setCsv('');
-        onDone();
+    setPreview(null);
+    const res = await run(async () => {
+      try {
+        return await adminApi.importCsv(csv, true);
+      } catch (e) {
+        if (e instanceof CsvImportError) {
+          setErrors(e.errors);
+          return null;
+        }
+        throw e;
       }
-    } catch (err) {
-      if (err instanceof CsvImportError) setErrors(err.errors);
-      else setMessage(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+    });
+    if (res.ok && res.value && 'preview' in res.value) setPreview(res.value.preview);
+  };
+  const register = () =>
+    run(() => adminApi.importCsv(csv, false), {
+      success: '登録しました',
+      onSuccess: (r) => {
+        if (!('valid' in r)) {
+          setCsv('');
+          setPreview(null);
+          onOpenChange(false);
+          onDone();
+        }
+      },
+    });
+
+  // 取り込み用のひな形（部門名は実際の部門から作る）
+  const template = () => {
+    const a = departments[0]?.name ?? '総務部';
+    const b = departments[1]?.name ?? '模擬店部';
+    downloadText(
+      'users-template.csv',
+      '﻿email,name,is_admin,target_hours,max_hours,departments\r\n' +
+        `taro@example.com,高専 太郎,,6,8,${a}\r\n` +
+        `hanako@example.com,高専 花子,,4,,${a}|${b}:no\r\n`,
+      'text/csv',
+    );
+  };
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold">CSV一括登録</h2>
-      <p className="text-muted-foreground text-sm">
-        ヘッダ: <code>email,name,is_admin,target_hours,max_hours,departments</code>
-        。部門は <code>|</code> 区切り、希望入力が不要な部門は末尾に <code>:no</code>
-        （例: <code>総務部|放送部:no</code>
-        ）。同じメールは更新されます。1行でも誤りがあれば何も登録しません。
-      </p>
-      <Input
-        type="file"
-        accept=".csv,text/csv"
-        onChange={(e) => void e.target.files?.[0]?.text().then(setCsv)}
-      />
-      <Textarea rows={6} value={csv} onChange={(e) => setCsv(e.target.value)} />
-      <div className="flex gap-2">
-        <Button variant="outline" disabled={busy || !csv.trim()} onClick={() => void run(true)}>
-          検証のみ
-        </Button>
-        <Button disabled={busy || !csv.trim()} onClick={() => void run(false)}>
-          登録
-        </Button>
-      </div>
-      {message && <p className="text-sm">{message}</p>}
-      {errors.length > 0 && (
-        <ul className="text-destructive list-disc pl-5 text-sm">
-          {errors.map((e, i) => (
-            <li key={i}>
-              {e.line} 行目: {e.message}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>CSVで一括登録</DialogTitle>
+          <DialogDescription>
+            同じメールアドレスは更新されます。1行でも誤りがあれば、何も登録しません。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={template}>
+            ひな形をダウンロード
+          </Button>
+          <Input
+            type="file"
+            accept=".csv,text/csv"
+            className="max-w-xs"
+            onChange={(e) => {
+              setPreview(null);
+              setErrors([]);
+              void e.target.files?.[0]?.text().then(setCsv);
+            }}
+          />
+        </div>
+        <p className="text-muted-foreground text-xs">
+          列: <code>email,name,is_admin,target_hours,max_hours,departments</code>。部門は{' '}
+          <code>|</code> 区切りで、希望入力が不要な部門は末尾に <code>:no</code>（例:{' '}
+          <code>総務部|放送部:no</code>）。
+        </p>
+        <Textarea
+          rows={6}
+          value={csv}
+          placeholder="ここに貼り付けるか、ファイルを選んでください"
+          onChange={(e) => {
+            setCsv(e.target.value);
+            setPreview(null);
+          }}
+        />
+        {error && <ErrorAlert>{error}</ErrorAlert>}
+        {errors.length > 0 && (
+          <Notice kind="error" title={`${errors.length} 件の誤りがあります`}>
+            <ul className="list-disc pl-5">
+              {errors.map((e, i) => (
+                <li key={i}>
+                  {e.line} 行目: {e.message}
+                </li>
+              ))}
+            </ul>
+          </Notice>
+        )}
+        {preview && (
+          <div className="space-y-2">
+            <Notice kind="info">
+              {preview.length} 件を取り込めます。内容を確認して登録してください。
+            </Notice>
+            <div className="max-h-48 overflow-auto rounded border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>氏名</TableHead>
+                    <TableHead>メール</TableHead>
+                    <TableHead>部門</TableHead>
+                    <TableHead>目標/上限(h)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {preview.map((u) => (
+                    <TableRow key={u.email}>
+                      <TableCell>
+                        {u.name}
+                        {u.isAdmin && <Badge className="ml-1">管理者</Badge>}
+                      </TableCell>
+                      <TableCell>{u.email}</TableCell>
+                      <TableCell className="whitespace-normal">
+                        {u.roles
+                          .map(
+                            (r) =>
+                              deptName(r.departmentId) +
+                              (r.requiresAvailability ? '' : '（入力不要）'),
+                          )
+                          .join('、')}
+                      </TableCell>
+                      <TableCell>
+                        {toHours(u.targetMinutes) || '-'} / {toHours(u.maxMinutes) || '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" disabled={pending || !csv.trim()} onClick={() => void check()}>
+            内容を確認
+          </Button>
+          <Button disabled={pending || !preview} onClick={() => void register()}>
+            {preview ? `${preview.length} 件を登録` : '登録'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
+
+type SortKey = 'name' | 'target' | 'dept';
 
 export function AdminUsers() {
   const { users, departments } = useLoaderData<AdminUsersData>();
   const { revalidate } = useRevalidator();
   const [editing, setEditing] = useState<AdminUser | 'new' | null>(null);
-  const [error, setError] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [q, setQ] = useQueryParam('q');
+  const [deptParam, setDept] = useQueryParam('dept');
+  const [sortParam, setSort] = useQueryParam('sort');
+  const sort: SortKey = sortParam === 'target' || sortParam === 'dept' ? sortParam : 'name';
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '?';
   const done = () => {
     setEditing(null);
     void revalidate();
   };
 
-  async function remove(u: AdminUser) {
-    if (!window.confirm(`${u.name}（${u.email}）を削除しますか？希望入力も消えます。`)) return;
-    try {
-      await adminApi.deleteUser(u.id);
-      setError('');
-      void revalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
+  const shown = useMemo(() => {
+    const query = (q ?? '').trim();
+    const dept = deptParam ? Number(deptParam) : null;
+    return users
+      .filter((u) => !query || u.name.includes(query) || u.email.includes(query))
+      .filter((u) => dept === null || u.roles.some((r) => r.departmentId === dept))
+      .sort((a, b) => {
+        if (sort === 'target') return (b.targetMinutes ?? -1) - (a.targetMinutes ?? -1);
+        if (sort === 'dept')
+          return (
+            (a.roles[0]?.departmentId ?? 999) - (b.roles[0]?.departmentId ?? 999) ||
+            a.name.localeCompare(b.name, 'ja')
+          );
+        return a.name.localeCompare(b.name, 'ja');
+      });
+  }, [users, q, deptParam, sort]);
 
   return (
     <Page wide>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">ユーザー管理</h1>
-        <Button onClick={() => setEditing('new')}>ユーザーを追加</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCsvOpen(true)}>
+            CSVで一括登録
+          </Button>
+          <Button onClick={() => setEditing('new')}>ユーザーを追加</Button>
+        </div>
       </div>
-      {error && <ErrorAlert>{error}</ErrorAlert>}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          placeholder="名前・メールで検索"
+          value={q ?? ''}
+          onChange={(e) => setQ(e.target.value || null)}
+          className="max-w-xs"
+          aria-label="名前・メールで検索"
+        />
+        <Select value={deptParam ?? 'all'} onValueChange={(v) => setDept(v === 'all' ? null : v)}>
+          <SelectTrigger className="w-40" aria-label="部門で絞り込み">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">すべての部門</SelectItem>
+            {departments.map((d) => (
+              <SelectItem key={d.id} value={String(d.id)}>
+                {d.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(v) => setSort(v === 'name' ? null : v)}>
+          <SelectTrigger className="w-44" aria-label="並べ替え">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">名前順</SelectItem>
+            <SelectItem value="target">目標勤務時間が長い順</SelectItem>
+            <SelectItem value="dept">部門順</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-muted-foreground text-sm">
+          {shown.length} / {users.length} 人
+        </span>
+      </div>
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
@@ -301,10 +483,17 @@ export function AdminUsers() {
                   ? adminApi.createUser(input)
                   : adminApi.updateUser(editing.id, input)
               }
+              remove={editing === 'new' ? undefined : () => adminApi.deleteUser(editing.id)}
             />
           )}
         </DialogContent>
       </Dialog>
+      <CsvDialog
+        open={csvOpen}
+        onOpenChange={setCsvOpen}
+        departments={departments}
+        onDone={() => void revalidate()}
+      />
 
       <div className="bg-card rounded-lg border">
         <Table>
@@ -318,7 +507,7 @@ export function AdminUsers() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((u) => (
+            {shown.map((u) => (
               <TableRow key={u.id}>
                 <TableCell>
                   {u.name}
@@ -347,16 +536,19 @@ export function AdminUsers() {
                   <Button size="sm" variant="outline" onClick={() => setEditing(u)}>
                     編集
                   </Button>
-                  <Button size="sm" variant="destructive" onClick={() => void remove(u)}>
-                    削除
-                  </Button>
                 </TableCell>
               </TableRow>
             ))}
+            {shown.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center">
+                  該当するユーザーがいません
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>
-      <CsvImport onDone={() => void revalidate()} />
     </Page>
   );
 }

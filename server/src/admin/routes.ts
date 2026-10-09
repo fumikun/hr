@@ -258,7 +258,7 @@ export function adminRoutes(
         const { csv, dryRun } = c.req.valid('json');
         const { users, errors } = parseUserCsv(csv, await store.listDepartments());
         if (errors.length > 0) return c.json({ errors }, 422);
-        if (dryRun) return c.json({ valid: users.length });
+        if (dryRun) return c.json({ valid: users.length, preview: users });
         return c.json(await store.importUsers(users, actorId(c)));
       })
   );

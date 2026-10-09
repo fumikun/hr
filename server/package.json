@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=../.env.local src/db/migrate.ts",
-    "db:seed": "tsx --env-file-if-exists=../.env.local src/db/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=../.env.local src/db/seed.ts",
+    "perf:seed": "tsx --env-file-if-exists=../.env.local src/db/perfSeed.ts"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",

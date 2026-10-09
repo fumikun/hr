@@ -1,3 +1,5 @@
+import { dateKey, dayStart } from './datetime';
+
 export type AvailabilityType = 'want' | 'ok' | 'ng';
 /** 時刻はミリ秒。departmentId は ng のとき null（全部門共通） */
 export type PaintEntry = {
@@ -40,4 +42,16 @@ export function paint(
     else merged.push({ ...e });
   }
   return [...others, ...merged];
+}
+
+/**
+ * from の日の入力を to の日にコピーする。to の日の既存の入力は置き換える。
+ * 日付の差は 24 時間単位（日本は夏時間なし）。
+ */
+export function copyDay(entries: PaintEntry[], from: string, to: string): PaintEntry[] {
+  const shift = dayStart(to).getTime() - dayStart(from).getTime();
+  const copied = entries
+    .filter((e) => dateKey(e.start) === from)
+    .map((e) => ({ ...e, start: e.start + shift, end: e.end + shift }));
+  return [...entries.filter((e) => dateKey(e.start) !== to), ...copied];
 }

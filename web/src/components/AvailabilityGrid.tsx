@@ -39,6 +39,7 @@ export function AvailabilityGrid({
   shifts,
   tool,
   disabled,
+  touchPaint,
   onChange,
 }: {
   dayStart: number;
@@ -51,6 +52,8 @@ export function AvailabilityGrid({
   shifts: Map<number, { start: number; end: number }[]>;
   tool: Tool;
   disabled: boolean;
+  /** true: 指でのドラッグで塗る（スクロールは止まる）。false: 指のドラッグはスクロール、タップで30分を塗る */
+  touchPaint: boolean;
   onChange: (next: PaintEntry[]) => void;
 }) {
   const msPx = hourPx / 3_600_000;
@@ -135,7 +138,11 @@ export function AvailabilityGrid({
               <span className="text-muted-foreground truncate text-xs">{sub}</span>
             </div>
             <div
-              className={cn('relative h-14', disabled ? 'cursor-not-allowed' : 'cursor-crosshair')}
+              className={cn(
+                'relative h-14',
+                disabled ? 'cursor-not-allowed' : 'cursor-crosshair',
+                touchPaint && 'touch-none',
+              )}
               style={{
                 width: hours.length * hourPx,
                 backgroundImage: [

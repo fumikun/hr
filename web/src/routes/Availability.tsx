@@ -1,8 +1,8 @@
+import { Copy, Hand, Pencil } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useLoaderData, useParams, useRevalidator } from 'react-router';
-import { toast } from 'sonner';
+import { Link, useBlocker, useLoaderData, useParams, useRevalidator } from 'react-router';
 import { adminAvailabilityApi, availabilityApi, type AvailabilityData } from '../api';
-import { paint, rowOf, type PaintEntry } from '../lib/paint';
+import { copyDay, paint, rowOf, type PaintEntry } from '../lib/paint';
 import {
   AvailabilityGrid,
   TYPE_LABEL,
@@ -10,27 +10,31 @@ import {
   type GridRow,
   type Tool,
 } from '@/components/AvailabilityGrid';
-import { ErrorAlert, Page } from '@/components/Page';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { ErrorAlert, Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { dateKey, dayStart as dayStartOf, fmtDateTime, hm, md } from '@/lib/datetime';
+import { useAction } from '@/lib/useAction';
 import { cn } from '@/lib/utils';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const dateKey = (ms: number) => {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-const dayStartOf = (key: string) => new Date(`${key}T00:00`).getTime();
-const fmtTime = (ms: number) => {
-  const d = new Date(ms);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-const fmtDateTime = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })
-    : '未設定';
 const ZOOMS = [64, 96, 144];
 
 const toEntries = (d: AvailabilityData): PaintEntry[] =>
@@ -45,28 +49,65 @@ const sameEntries = (a: PaintEntry[], b: PaintEntry[]) => {
   return a.map(key).sort().join() === b.map(key).sort().join();
 };
 
+/** 色の凡例。ペンの意味もここで説明する */
+function Legend() {
+  return (
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      {(
+        [
+          ['ng', '絶対に入れない時間（全部門共通）'],
+          ['want', '入りたい時間（優先して割り当てます）'],
+          ['ok', '入れる時間（明示したいとき。塗らない時間も「入れる」扱いです）'],
+        ] as const
+      ).map(([t, text]) => (
+        <li key={t} className="flex items-center gap-1.5">
+          <span className={cn('inline-block h-3 w-5 rounded border', TYPE_STYLE[t])} />
+          {text}
+        </li>
+      ))}
+      <li className="flex items-center gap-1.5">
+        <span className="bg-muted-foreground/15 inline-block h-3 w-5 rounded border" />
+        シフト枠がある時間
+      </li>
+    </ul>
+  );
+}
+
 export function Availability() {
   const data = useLoaderData<AvailabilityData & { userName?: string }>();
   // /admin/users/:userId/availability では、管理者が受付期間に関係なく代理で入力する
   const { userId } = useParams();
   const proxyFor = userId ? Number(userId) : null;
   const { revalidate } = useRevalidator();
+  const confirm = useConfirm();
+  const { run, pending, error } = useAction();
   const [saved, setSaved] = useState(() => toEntries(data));
   const [entries, setEntries] = useState(saved);
   const [tool, setTool] = useState<Tool>('want');
   const [zoom, setZoom] = useState(1);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [touchPaint, setTouchPaint] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const dirty = !sameEntries(entries, saved);
   const editable = proxyFor !== null || data.open;
 
-  // 保存せずにページを離れるときの確認
+  // タブを閉じるとき・画面内で別のページへ移るときの、未保存の確認
   useEffect(() => {
     if (!dirty) return;
     const h = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener('beforeunload', h);
     return () => window.removeEventListener('beforeunload', h);
   }, [dirty]);
+  const blocker = useBlocker(dirty);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    void confirm({
+      title: '保存していない変更があります',
+      description: 'このまま移動すると、入力した内容が消えます。',
+      confirmLabel: '破棄して移動',
+      cancelLabel: 'このページに残る',
+      destructive: true,
+    }).then((ok) => (ok ? blocker.proceed() : blocker.reset()));
+  }, [blocker, confirm]);
 
   // シフト枠のある日を表示対象にする。入力済みの日も落とさない。
   const shifts = useMemo(() => {
@@ -97,17 +138,18 @@ export function Availability() {
   ];
 
   // 表示する時間帯: その日のシフト枠と入力済みの範囲を含む
-  const dayStart = current ? dayStartOf(current) : 0;
+  const dayStart = current ? dayStartOf(current).getTime() : 0;
   const bounds = useMemo(() => {
-    const spans: { start: number; end: number }[] = [
-      ...[...(shifts.get(current)?.values() ?? [])].flat(),
-      ...entries.filter((e) => dateKey(e.start) === current),
-    ];
+    const shiftSpans = [...(shifts.get(current)?.values() ?? [])].flat();
+    const spans = [...shiftSpans, ...entries.filter((e) => dateKey(e.start) === current)];
     const lo = Math.min(...spans.map((s) => s.start - dayStart), 8 * 3_600_000);
     const hi = Math.max(...spans.map((s) => s.end - dayStart), 18 * 3_600_000);
     return {
       startHour: Math.max(0, Math.floor(lo / 3_600_000)),
       endHour: Math.min(24, Math.ceil(hi / 3_600_000)),
+      // 手動追加の初期値: その日のシフト枠の最初〜最後
+      first: shiftSpans.length ? Math.min(...shiftSpans.map((s) => s.start)) : null,
+      last: shiftSpans.length ? Math.max(...shiftSpans.map((s) => s.end)) : null,
     };
   }, [shifts, entries, current, dayStart]);
 
@@ -117,30 +159,32 @@ export function Availability() {
   const deptName = (id: number | null) =>
     id === null ? '全部門' : (data.departments.find((d) => d.id === id)?.name ?? '?');
 
-  async function save() {
-    setBusy(true);
-    setError('');
-    try {
-      const dto = entries.map((e) => ({
-        type: e.type,
-        departmentId: e.departmentId,
-        startsAt: new Date(e.start).toISOString(),
-        endsAt: new Date(e.end).toISOString(),
-      }));
-      if (proxyFor !== null) await adminAvailabilityApi.save(proxyFor, dto);
-      else await availabilityApi.save(dto);
-      setSaved(entries);
-      toast.success('希望を保存しました。受付期間内は何度でも修正できます。');
-      void revalidate();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const save = () =>
+    run(
+      async () => {
+        const dto = entries.map((e) => ({
+          type: e.type,
+          departmentId: e.departmentId,
+          startsAt: new Date(e.start).toISOString(),
+          endsAt: new Date(e.end).toISOString(),
+        }));
+        if (proxyFor !== null) await adminAvailabilityApi.save(proxyFor, dto);
+        else await availabilityApi.save(dto);
+        setSaved(entries);
+      },
+      {
+        success: '希望を保存しました。受付期間内は何度でも修正できます。',
+        onSuccess: () => void revalidate(),
+      },
+    );
 
   return (
     <Page wide>
+      {proxyFor !== null && (
+        <Link to="/admin/availability" className="text-muted-foreground text-sm hover:underline">
+          ← 入力状況の一覧に戻る
+        </Link>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-bold">
           {proxyFor === null ? 'シフト希望入力' : `${data.userName ?? ''}さんのシフト希望`}
@@ -158,26 +202,36 @@ export function Availability() {
         {data.submittedAt && ` ／ 最終保存: ${fmtDateTime(data.submittedAt)}`}
       </p>
       {!editable && (
-        <ErrorAlert>
-          受付期間外のため、入力内容の閲覧のみ可能です。変更が必要な場合は管理者に連絡してください。
-        </ErrorAlert>
+        <Notice kind="info" title="受付期間外です">
+          入力内容の閲覧のみ可能です。変更が必要な場合は管理者に連絡してください。
+        </Notice>
       )}
       {data.departments.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-6 text-center text-sm">
-          あなたにはシフト希望の入力が必要な役職がありません。
-        </p>
+        <Notice kind="info">
+          {proxyFor === null ? 'あなたには' : 'この人には'}
+          シフト希望の入力が必要な役職がありません。
+        </Notice>
       ) : days.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-6 text-center text-sm">
+        <Notice kind="info">
           まだシフト枠が作成されていません。管理者が枠を作成するまでお待ちください。
-        </p>
+        </Notice>
       ) : (
         <>
-          <p className="text-muted-foreground text-sm">
-            何も入力しない時間帯は「入れる」として扱われます。「入れない」時間帯と、特に入りたい時間帯だけ塗ってください。
-            灰色の帯はその部門にシフト枠がある時間です。
-          </p>
+          <Legend />
+          <details open={!data.submittedAt} className="rounded-lg border px-3 py-2 text-sm">
+            <summary className="cursor-pointer font-medium">使い方</summary>
+            <ul className="text-muted-foreground mt-2 list-disc space-y-1 pl-5">
+              <li>何も入力しない時間帯は「入れる」として扱われます。</li>
+              <li>「入れない」行を塗ると、その時間はどの部門にも割り当てられません。</li>
+              <li>部門の行を「入りたい」で塗ると、その時間を優先して割り当てます。</li>
+              <li>
+                パソコンはドラッグ、スマホはタップ（30分ずつ）か、下の「時刻を入力して追加」を使います。
+              </li>
+              <li>締切まで何度でも修正できます。保存しないと反映されません。</li>
+            </ul>
+          </details>
 
-          <div className="bg-background sticky top-12 z-30 lg:top-0 flex flex-wrap items-center gap-2 rounded-lg border p-2">
+          <div className="bg-background sticky top-12 z-30 flex flex-wrap items-center gap-2 rounded-lg border p-2 lg:top-0">
             <span className="text-sm font-medium">ペン:</span>
             {(
               [
@@ -190,14 +244,23 @@ export function Availability() {
                 key={t}
                 size="sm"
                 variant={tool === t ? 'default' : 'outline'}
+                aria-pressed={tool === t}
                 onClick={() => setTool(t)}
               >
                 {label}
               </Button>
             ))}
-            <span className="text-muted-foreground text-xs">
-              「入れない」行は常に「入れない」で塗ります
-            </span>
+            <Button
+              size="sm"
+              variant={touchPaint ? 'default' : 'outline'}
+              className="lg:hidden"
+              aria-pressed={touchPaint}
+              onClick={() => setTouchPaint(!touchPaint)}
+              title="指でなぞって塗るか、指で横にスクロールするかを切り替えます"
+            >
+              {touchPaint ? <Pencil className="size-4" /> : <Hand className="size-4" />}
+              {touchPaint ? '指でなぞって塗る' : '指でスクロール'}
+            </Button>
             <div className="ml-auto flex gap-1">
               <Button
                 size="sm"
@@ -220,7 +283,7 @@ export function Availability() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {days.map((d) => (
               <Button
                 key={d}
@@ -228,10 +291,21 @@ export function Availability() {
                 variant={d === current ? 'default' : 'outline'}
                 onClick={() => setDay(d)}
               >
-                {d.slice(5).replace('-', '/')}
+                {md(d)}
                 {entries.some((e) => dateKey(e.start) === d) && ' ●'}
               </Button>
             ))}
+            {editable && days.length > 1 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto"
+                onClick={() => setCopyOpen(true)}
+              >
+                <Copy className="size-4" aria-hidden />
+                この日の入力を他の日にコピー
+              </Button>
+            )}
           </div>
 
           <AvailabilityGrid
@@ -244,11 +318,9 @@ export function Availability() {
             shifts={shifts.get(current) ?? new Map()}
             tool={tool}
             disabled={!editable}
+            touchPaint={touchPaint}
             onChange={setEntries}
           />
-          <p className="text-muted-foreground text-xs">
-            ドラッグで範囲を塗る（5分単位）／クリック・タップで30分を塗る・消す。スマホでは下の「時刻を入力して追加」も使えます。
-          </p>
 
           <ul className="flex flex-wrap gap-2">
             {dayEntries.map((e) => (
@@ -259,12 +331,12 @@ export function Availability() {
                   TYPE_STYLE[e.type],
                 )}
               >
-                {TYPE_LABEL[e.type]}・{deptName(rowOf(e))} {fmtTime(e.start)}–{fmtTime(e.end)}
+                {TYPE_LABEL[e.type]}・{deptName(rowOf(e))} {hm(e.start)}–{hm(e.end)}
                 {editable && (
                   <button
                     type="button"
-                    className="ml-1 font-bold"
-                    aria-label="削除"
+                    className="ml-1 px-1 font-bold"
+                    aria-label={`${hm(e.start)}から${hm(e.end)}の入力を削除`}
                     onClick={() => setEntries(paint(entries, rowOf(e), e, null))}
                   >
                     ×
@@ -281,25 +353,48 @@ export function Availability() {
 
           {editable && (
             <ManualAdd
+              key={current}
               rows={rows}
               day={current}
+              defaultStart={bounds.first}
+              defaultEnd={bounds.last}
               onAdd={(row, type, start, end) =>
                 setEntries(paint(entries, row, { start, end }, type))
               }
             />
           )}
 
+          <CopyDayDialog
+            open={copyOpen}
+            onOpenChange={setCopyOpen}
+            from={current}
+            days={days.filter((d) => d !== current)}
+            entries={entries}
+            onApply={(targets) => {
+              setEntries(targets.reduce((acc, to) => copyDay(acc, current, to), entries));
+              setCopyOpen(false);
+            }}
+          />
+
           {error && <ErrorAlert>{error}</ErrorAlert>}
-          <div className="bg-background sticky bottom-0 flex items-center justify-between gap-2 border-t py-3">
+          <div className="bg-background sticky bottom-0 z-20 flex items-center justify-between gap-2 border-t py-3">
             <span className="text-sm">
-              {dirty ? '未保存の変更があります' : '変更はありません（保存済み）'}
+              {dirty ? (
+                <span className="font-medium text-amber-700">未保存の変更があります</span>
+              ) : (
+                '変更はありません（保存済み）'
+              )}
             </span>
             <div className="flex gap-2">
-              <Button variant="outline" disabled={!dirty || busy} onClick={() => setEntries(saved)}>
+              <Button
+                variant="outline"
+                disabled={!dirty || pending}
+                onClick={() => setEntries(saved)}
+              >
                 元に戻す
               </Button>
-              <Button disabled={!editable || !dirty || busy} onClick={() => void save()}>
-                保存
+              <Button disabled={!editable || !dirty || pending} onClick={() => void save()}>
+                {pending ? '保存中…' : '保存'}
               </Button>
             </div>
           </div>
@@ -309,19 +404,82 @@ export function Availability() {
   );
 }
 
+function CopyDayDialog({
+  open,
+  onOpenChange,
+  from,
+  days,
+  entries,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  from: string;
+  days: string[];
+  entries: PaintEntry[];
+  onApply: (targets: string[]) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const filled = (d: string) => entries.some((e) => dateKey(e.start) === d);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o);
+        if (!o) setPicked([]);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{md(from)} の入力をコピー</DialogTitle>
+          <DialogDescription>
+            コピー先の日にすでに入力がある場合は、置き換えられます。保存するまで確定しません。
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="space-y-2">
+          {days.map((d) => (
+            <li key={d} className="flex items-center gap-2">
+              <Checkbox
+                id={`copy-${d}`}
+                checked={picked.includes(d)}
+                onCheckedChange={(v) =>
+                  setPicked(v === true ? [...picked, d] : picked.filter((x) => x !== d))
+                }
+              />
+              <Label htmlFor={`copy-${d}`}>
+                {md(d)}
+                {filled(d) && (
+                  <span className="text-muted-foreground ml-2 text-xs">（入力あり→置換）</span>
+                )}
+              </Label>
+            </li>
+          ))}
+        </ul>
+        <Button disabled={picked.length === 0} onClick={() => onApply(picked)}>
+          {picked.length} 日にコピー
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ManualAdd({
   rows,
   day,
+  defaultStart,
+  defaultEnd,
   onAdd,
 }: {
   rows: GridRow[];
   day: string;
+  defaultStart: number | null;
+  defaultEnd: number | null;
   onAdd: (row: number | null, type: 'ng' | 'want' | 'ok', start: number, end: number) => void;
 }) {
   const [row, setRow] = useState('ng');
   const [type, setType] = useState<'want' | 'ok'>('want');
-  const [start, setStart] = useState('09:00');
-  const [end, setEnd] = useState('12:00');
+  const [start, setStart] = useState(defaultStart ? hm(defaultStart) : '09:00');
+  const [end, setEnd] = useState(defaultEnd ? hm(defaultEnd) : '12:00');
   const [error, setError] = useState('');
 
   function add() {
@@ -332,7 +490,6 @@ function ManualAdd({
     if (row === 'ng') onAdd(null, 'ng', s, e);
     else onAdd(Number(row), type, s, e);
   }
-  const selectCls = 'border-input h-9 rounded-md border bg-transparent px-2 text-sm';
 
   return (
     <details className="rounded-lg border p-3">
@@ -340,31 +497,31 @@ function ManualAdd({
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="ma-row">対象</Label>
-          <select
-            id="ma-row"
-            className={selectCls}
-            value={row}
-            onChange={(e) => setRow(e.target.value)}
-          >
-            {rows.map((r) => (
-              <option key={String(r.row)} value={r.row === null ? 'ng' : String(r.row)}>
-                {r.row === null ? '入れない（全部門）' : r.label}
-              </option>
-            ))}
-          </select>
+          <Select value={row} onValueChange={setRow}>
+            <SelectTrigger id="ma-row" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {rows.map((r) => (
+                <SelectItem key={String(r.row)} value={r.row === null ? 'ng' : String(r.row)}>
+                  {r.row === null ? '入れない（全部門）' : r.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {row !== 'ng' && (
           <div className="grid gap-1.5">
             <Label htmlFor="ma-type">種類</Label>
-            <select
-              id="ma-type"
-              className={selectCls}
-              value={type}
-              onChange={(e) => setType(e.target.value as 'want' | 'ok')}
-            >
-              <option value="want">入りたい</option>
-              <option value="ok">入れる</option>
-            </select>
+            <Select value={type} onValueChange={(v) => setType(v as 'want' | 'ok')}>
+              <SelectTrigger id="ma-type" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="want">入りたい</SelectItem>
+                <SelectItem value="ok">入れる</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
         <div className="grid gap-1.5">

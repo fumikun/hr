@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gte, like, lt, or } from 'drizzle-orm';
 import type { createDb } from '../db/client.js';
 import {
   assignmentRuns,
@@ -6,6 +6,7 @@ import {
   auditLogs,
   availabilities,
   postMembers,
+  settings,
   posts,
   shiftSlots,
   userRoles,
@@ -27,15 +28,30 @@ const toRun = (r: typeof assignmentRuns.$inferSelect): Run => ({
 
 export function createAssignStore(db: Db): AssignStore & AuditStore {
   return {
-    async listAudit(limit, before) {
+    async listAudit(limit, before, filter = {}) {
       const rows = await db
         .select({ log: auditLogs, actorName: users.name })
         .from(auditLogs)
         .leftJoin(users, eq(users.id, auditLogs.actorId))
-        .where(before === undefined ? undefined : lt(auditLogs.id, before))
+        .where(
+          and(
+            before === undefined ? undefined : lt(auditLogs.id, before),
+            filter.actorId === undefined ? undefined : eq(auditLogs.actorId, filter.actorId),
+            filter.actionPrefix === undefined
+              ? undefined
+              : like(auditLogs.action, `${filter.actionPrefix.replace(/[%_\\]/g, '\\$&')}%`),
+            filter.from === undefined ? undefined : gte(auditLogs.createdAt, filter.from),
+            filter.to === undefined ? undefined : lt(auditLogs.createdAt, filter.to),
+          ),
+        )
         .orderBy(desc(auditLogs.id))
         .limit(limit);
       return rows.map(({ log, actorName }) => ({ ...log, actorName }));
+    },
+
+    async getPublishedAt() {
+      const [row] = await db.select().from(settings).where(eq(settings.key, 'shifts_published_at'));
+      return row ? new Date(row.value as string) : null;
     },
 
     setStatusAll: (status, actorId) =>
@@ -46,6 +62,13 @@ export function createAssignStore(db: Db): AssignStore & AuditStore {
           .set({ status })
           .where(eq(assignments.status, from))
           .returning({ userId: assignments.userId });
+        if (status === 'confirmed' && rows.length > 0) {
+          const value = new Date().toISOString();
+          await tx
+            .insert(settings)
+            .values({ key: 'shifts_published_at', value })
+            .onConflictDoUpdate({ target: settings.key, set: { value } });
+        }
         await tx.insert(auditLogs).values({
           actorId,
           action: status === 'confirmed' ? 'assign.confirm' : 'assign.unconfirm',

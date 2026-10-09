@@ -1,56 +1,58 @@
 import { useState } from 'react';
 import { useLoaderData, useNavigate } from 'react-router';
 import { confirmOnboarding, type Onboarding as OnboardingData } from '../api';
-import { Page } from '@/components/Page';
+import { ErrorAlert, Page } from '@/components/Page';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { useAction } from '@/lib/useAction';
 
 export function Onboarding() {
   const { roles } = useLoaderData<OnboardingData>();
   const [checked, setChecked] = useState(false);
-  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  const { run, pending, error } = useAction();
+  const none = roles.length === 0;
 
-  async function submit() {
-    setBusy(true);
-    try {
-      await confirmOnboarding();
-      await navigate('/');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const submit = () => run(confirmOnboarding, { onSuccess: () => void navigate('/') });
 
   return (
     <Page>
       <Card>
         <CardHeader>
-          <CardTitle>シフト希望の入力が必要な役職</CardTitle>
+          <CardTitle>{none ? 'はじめに' : 'シフト希望の入力が必要な役職'}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {roles.length === 0 ? (
-            <p>あなたにシフト希望の入力が必要な役職はありません。</p>
+          {none ? (
+            <p className="text-sm">
+              あなたにシフト希望の入力が必要な役職はありません。確定したシフトは「自分のシフト」で確認できます。
+            </p>
           ) : (
-            <ul className="list-disc pl-5">
-              {roles.map((r) => (
-                <li key={r.departmentId}>{r.name}</li>
-              ))}
-            </ul>
+            <>
+              <p className="text-muted-foreground text-sm">
+                次の役職は、シフト希望の入力が必要です。内容を確認してください。
+              </p>
+              <ul className="list-disc pl-5">
+                {roles.map((r) => (
+                  <li key={r.departmentId}>{r.name}</li>
+                ))}
+              </ul>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="confirm"
+                  checked={checked}
+                  onCheckedChange={(v) => setChecked(v === true)}
+                />
+                <Label htmlFor="confirm">上記の内容を確認しました</Label>
+              </div>
+            </>
           )}
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="confirm"
-              checked={checked}
-              onCheckedChange={(v) => setChecked(v === true)}
-            />
-            <Label htmlFor="confirm">上記の内容を確認しました</Label>
-          </div>
+          {error && <ErrorAlert>{error}</ErrorAlert>}
         </CardContent>
         <CardFooter>
-          <Button disabled={!checked || busy} onClick={() => void submit()}>
-            確認して進む
+          <Button disabled={(!none && !checked) || pending} onClick={() => void submit()}>
+            {none ? 'はじめる' : '確認して進む'}
           </Button>
         </CardFooter>
       </Card>

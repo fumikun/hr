@@ -23,6 +23,7 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   const slots: Slot[] = [];
   const assignments: AssignmentRow[] = [];
   const runs: Run[] = [];
+  let publishedAt: Date | null = null;
   const posts: Post[] = [];
   let nextPostId = 1;
   let period: Period = { opensAt: null, closesAt: null };
@@ -119,7 +120,9 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
     latestRun: () => Promise.resolve(runs.length ? { ...runs[runs.length - 1]! } : null),
     failStaleRuns: () => Promise.resolve(),
     listAudit: () => Promise.resolve([]),
+    getPublishedAt: () => Promise.resolve(publishedAt),
     setStatusAll: (status: 'draft' | 'confirmed') => {
+      if (status === 'confirmed') publishedAt = new Date();
       const target = assignments.filter((a) => a.status !== status);
       for (const a of target) a.status = status;
       return Promise.resolve(target.length);

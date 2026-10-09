@@ -5,11 +5,12 @@ import type { AdminStore } from '../admin/types.js';
 export function myShiftRoutes(store: AdminStore, userId: (c: Context) => number) {
   return new Hono().get('/shifts', async (c) => {
     const id = userId(c);
-    const [assignments, slots, posts, departments] = await Promise.all([
+    const [assignments, slots, posts, departments, publishedAt] = await Promise.all([
       store.listAssignments(),
       store.listSlots(),
       store.listPosts(),
       store.listDepartments(),
+      store.getPublishedAt(),
     ]);
     const mine = assignments
       .filter((a) => a.userId === id && a.status === 'confirmed')
@@ -27,6 +28,6 @@ export function myShiftRoutes(store: AdminStore, userId: (c: Context) => number)
         ];
       })
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
-    return c.json({ shifts: mine });
+    return c.json({ shifts: mine, publishedAt });
   });
 }

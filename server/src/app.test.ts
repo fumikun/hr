@@ -223,7 +223,7 @@ describe('admin API', () => {
       '/api/admin/users/import',
       json(cookie, 'POST', { csv: good, dryRun: true }),
     );
-    expect(await dry.json()).toEqual({ valid: 2 });
+    expect(await dry.json()).toMatchObject({ valid: 2, preview: [{}, {}] });
     expect(store.users).toHaveLength(1);
 
     const bad = head + 'a@example.test,A,総務部\nbroken,B,\n';
@@ -700,5 +700,102 @@ describe('admin API', () => {
     expect((await copy({ slotIds: [99], shiftDays: [1] })).status).toBe(404);
     expect((await copy({ slotIds: [1], shiftDays: [0] })).status).toBe(400);
     expect(store.slots).toHaveLength(6);
+  });
+});
+
+describe('user info cache', () => {
+  const user = (id: number, email: string, isAdmin: boolean) => ({
+    id,
+    email,
+    name: email,
+    isAdmin,
+  });
+  const setup = () => {
+    const people = new Map([
+      ['a@example.test', user(1, 'a@example.test', true)],
+      ['b@example.test', user(2, 'b@example.test', true)],
+    ]);
+    const mem = createMemoryStore(
+      [...people.values()].map((u) => ({ ...u, targetMinutes: null, maxMinutes: null, roles: [] })),
+    );
+    // 本物のストアと同じく、管理者フラグの変更が findUser にも反映されるようにする
+    const update = mem.updateUser.bind(mem);
+    mem.updateUser = async (id, input, actor) => {
+      const r = await update(id, input, actor);
+      for (const u of people.values()) if (u.id === id) u.isAdmin = input.isAdmin;
+      return r;
+    };
+    const del = mem.deleteUser.bind(mem);
+    mem.deleteUser = async (id, actor) => {
+      for (const [k, u] of people) if (u.id === id) people.delete(k);
+      return del(id, actor);
+    };
+    const app = createApp({
+      env: devEnv,
+      adminStore: mem,
+      solver: solve,
+      findUser: (email) => Promise.resolve(people.get(email) ?? null),
+      listUsers: () => Promise.resolve([...people.values()]),
+      getOnboarding: () => Promise.resolve({ confirmedAt: new Date(), roles: [] }),
+      confirmOnboarding: () => Promise.resolve(),
+    });
+    return { app };
+  };
+  const login = async (app: ReturnType<typeof setup>['app'], email: string) =>
+    (await devLogin(app, email)).cookie;
+  const get = (app: ReturnType<typeof setup>['app'], cookie: string) =>
+    app.request('/api/admin/users', { headers: { cookie } });
+  const edit = (
+    app: ReturnType<typeof setup>['app'],
+    cookie: string,
+    id: number,
+    isAdmin: boolean,
+  ) =>
+    app.request(`/api/admin/users/${id}`, {
+      method: 'PUT',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'b@example.test',
+        name: 'b',
+        isAdmin,
+        targetMinutes: null,
+        maxMinutes: null,
+        roles: [],
+      }),
+    });
+
+  it('revokes admin rights at once even though user info is cached', async () => {
+    const { app } = setup();
+    const a = await login(app, 'a@example.test');
+    const b = await login(app, 'b@example.test');
+    expect((await get(app, b)).status).toBe(200); // b の情報がキャッシュされる
+    expect((await edit(app, a, 2, false)).status).toBe(200);
+    expect((await get(app, b)).status).toBe(403); // 30秒待たずに反映される
+  });
+
+  it('locks out a deleted user at once', async () => {
+    const { app } = setup();
+    const a = await login(app, 'a@example.test');
+    const b = await login(app, 'b@example.test');
+    expect((await get(app, b)).status).toBe(200);
+    expect(
+      (await app.request('/api/admin/users/2', { method: 'DELETE', headers: { cookie: a } }))
+        .status,
+    ).toBe(200);
+    expect((await get(app, b)).status).toBe(403);
+  });
+
+  it('reports onboarding status in /api/me so the client needs one request', async () => {
+    const app = makeApp(devEnv);
+    const { cookie } = await devLogin(app, general.email);
+    const before = (await (await app.request('/api/me', { headers: { cookie } })).json()) as {
+      confirmed: boolean;
+    };
+    expect(before.confirmed).toBe(false);
+    await app.request('/api/me/onboarding/confirm', { method: 'POST', headers: { cookie } });
+    const after = (await (await app.request('/api/me', { headers: { cookie } })).json()) as {
+      confirmed: boolean;
+    };
+    expect(after.confirmed).toBe(true); // 確認直後に反映される（キャッシュに古い値を残さない）
   });
 });

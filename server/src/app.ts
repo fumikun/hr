@@ -1,6 +1,7 @@
 import { authHandler, initAuthConfig, verifyAuth } from '@hono/auth-js';
 import { Hono, type Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { createTtlCache } from './cache.js';
 import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
@@ -23,18 +24,66 @@ export type AppDeps = {
   adminStore: AdminStore;
   /** 自動割り当てのソルバー。省略時は別スレッドの HiGHS */
   solver?: Solver;
+  /**
+   * ログイン中ユーザーの情報（管理者か・初回確認済みか）を覚えておく時間。省略時は30秒。
+   * ユーザーの編集・削除・インポートと初回確認の完了では、すぐに破棄する。
+   */
+  userCacheTtlMs?: number;
 };
 
 export function createApp({
   env,
-  findUser,
+  findUser: findUserUncached,
   listUsers,
   getOnboarding,
-  confirmOnboarding,
-  adminStore,
+  confirmOnboarding: confirmOnboardingUncached,
+  adminStore: adminStoreUncached,
   solver = solveInWorker,
+  userCacheTtlMs = 30_000,
 }: AppDeps) {
   const app = new Hono();
+
+  // すべての API が毎回 DB に聞いていた「ユーザー情報」と「初回確認済みか」を短時間覚えておく。
+  // 管理者権限の変更・ユーザー削除は、下のラッパーですぐ破棄するので、反映は遅れない。
+  const userCache = createTtlCache<string, AppUser>(userCacheTtlMs);
+  const confirmedCache = createTtlCache<number, true>(userCacheTtlMs);
+  const dropCaches = () => {
+    userCache.clear();
+    confirmedCache.clear();
+  };
+  const findUser: FindUser = (email) => userCache.get(email, () => findUserUncached(email));
+  const isConfirmed = async (userId: number) =>
+    (await confirmedCache.get(userId, async () =>
+      (await getOnboarding(userId)).confirmedAt !== null ? true : null,
+    )) === true;
+  const confirmOnboarding = async (userId: number) => {
+    await confirmOnboardingUncached(userId);
+    confirmedCache.delete(userId);
+  };
+  const adminStore: AdminStore = {
+    ...adminStoreUncached,
+    createUser: async (...a) => {
+      const r = await adminStoreUncached.createUser(...a);
+      dropCaches();
+      return r;
+    },
+    updateUser: async (...a) => {
+      const r = await adminStoreUncached.updateUser(...a);
+      dropCaches();
+      return r;
+    },
+    deleteUser: async (...a) => {
+      const r = await adminStoreUncached.deleteUser(...a);
+      dropCaches();
+      return r;
+    },
+    importUsers: async (...a) => {
+      const r = await adminStoreUncached.importUsers(...a);
+      dropCaches();
+      return r;
+    },
+  };
+
   const assignRunner = createAssignRunner(adminStore, solver);
   const authConfig = createAuthConfig(env, findUser);
 
@@ -59,7 +108,13 @@ export function createApp({
   const sessionUserId = (c: Context): number =>
     Number((c.get('authUser')?.session.user as { id?: number } | undefined)?.id);
 
-  app.get('/api/me', verifyAuth(), (c) => c.json(c.get('authUser')?.session.user ?? null));
+  // 画面の最初の確認用。ログイン状態と「初回確認済みか」を1回で返す（往復を減らすため）
+  app.get('/api/me', verifyAuth(), async (c) =>
+    c.json({
+      ...c.get('authUser')?.session.user,
+      confirmed: await isConfirmed(sessionUserId(c)),
+    }),
+  );
 
   // 初回確認（F-07）: 確認済みになるまで、/api/me 系以外の業務 API を使わせない
   app.get('/api/me/onboarding', verifyAuth(), async (c) => {
@@ -72,8 +127,8 @@ export function createApp({
   });
 
   const requireConfirmed = createMiddleware(async (c, next) => {
-    const { confirmedAt } = await getOnboarding(sessionUserId(c));
-    if (confirmedAt === null) return c.json({ error: 'onboarding_required' }, 403);
+    if (!(await isConfirmed(sessionUserId(c))))
+      return c.json({ error: 'onboarding_required' }, 403);
     await next();
   });
   // 業務APIはここ以降に /api/app/* として載せる（認証＋初回確認が必須）

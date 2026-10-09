@@ -17,6 +17,7 @@ import {
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLoaderData, useLocation, useNavigation } from 'react-router';
 import { postAuthForm, type Me } from '../api';
+import { prefetchRoutes } from '../routes/lazy';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
@@ -115,6 +116,7 @@ export function AppShell() {
   const [open, setOpen] = useState(false);
   const loading = useNavigation().state === 'loading';
   const { pathname } = useLocation();
+  useEffect(() => prefetchRoutes(me.isAdmin), [me.isAdmin]);
 
   // タブの表示名を、今開いているメニュー名にする
   useEffect(() => {

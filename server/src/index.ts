@@ -1,7 +1,8 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { and, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { compress } from 'hono/compress';
 import { createAdminStore } from './admin/store.js';
 import { createApp } from './app.js';
 import { createDb } from './db/client.js';
@@ -19,17 +20,23 @@ const app = createApp({
     (await db.select().from(users).where(eq(users.email, email)).limit(1))[0] ?? null,
   listUsers: () => db.select().from(users),
   getOnboarding: async (userId) => {
-    const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    const roles = await db
-      .select({
-        departmentId: userRoles.departmentId,
-        name: departments.name,
-        requiresAvailability: userRoles.requiresAvailability,
-      })
-      .from(userRoles)
-      .innerJoin(departments, eq(departments.id, userRoles.departmentId))
-      .where(and(eq(userRoles.userId, userId), eq(userRoles.requiresAvailability, true)));
-    return { confirmedAt: u?.firstLoginConfirmedAt ?? null, roles };
+    const [[u], roles] = await Promise.all([
+      db
+        .select({ at: users.firstLoginConfirmedAt })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1),
+      db
+        .select({
+          departmentId: userRoles.departmentId,
+          name: departments.name,
+          requiresAvailability: userRoles.requiresAvailability,
+        })
+        .from(userRoles)
+        .innerJoin(departments, eq(departments.id, userRoles.departmentId))
+        .where(and(eq(userRoles.userId, userId), eq(userRoles.requiresAvailability, true))),
+    ]);
+    return { confirmedAt: u?.at ?? null, roles };
   },
   confirmOnboarding: async (userId) => {
     const now = new Date();
@@ -41,10 +48,28 @@ const app = createApp({
 });
 
 const root = new Hono();
+// 処理時間を Server-Timing ヘッダ（ブラウザの開発者ツールで見られる）と、遅いリクエストのログに出す
+const slowMs = Number(process.env.SLOW_REQUEST_MS ?? 300);
+root.use('/api/*', async (c, next) => {
+  const start = performance.now();
+  await next();
+  const ms = performance.now() - start;
+  c.header('Server-Timing', `app;dur=${ms.toFixed(1)}`);
+  if (ms >= slowMs) console.warn(`slow request: ${c.req.method} ${c.req.path} ${ms.toFixed(0)}ms`);
+});
+// JS・CSS・JSON を gzip で配信する（本番を Traefik で圧縮するなら、どちらか一方だけにする）
+root.use('*', compress());
 root.route('/', app);
-// ビルド済みSPAの静的配信（未知のパスは index.html にフォールバック）
-root.use('*', serveStatic({ root: '../web/dist' }));
-root.get('*', serveStatic({ path: '../web/dist/index.html' }));
+// ビルド済みSPAの静的配信（未知のパスは index.html にフォールバック）。
+// /assets/* はファイル名にハッシュが付くので長期キャッシュ、index.html は毎回確認して新しい版にすぐ切り替える。
+const cacheHeaders = (path: string, c: Context) => {
+  c.header(
+    'Cache-Control',
+    path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+  );
+};
+root.use('*', serveStatic({ root: '../web/dist', onFound: cacheHeaders }));
+root.get('*', serveStatic({ path: '../web/dist/index.html', onFound: cacheHeaders }));
 
 const port = Number(process.env.PORT ?? 3001);
 serve({ fetch: root.fetch, port });

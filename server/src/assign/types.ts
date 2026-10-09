@@ -80,6 +80,8 @@ export interface AssignStore {
   setLocked(pair: Pair, locked: boolean, actorId: number): Promise<boolean>;
   /** 下書き⇔確定を一括で切り替える。変更した件数を返す */
   setStatusAll(status: 'draft' | 'confirmed', actorId: number): Promise<number>;
+  /** 最後に確定した日時（一般ユーザーに「◯日に更新」と見せる） */
+  getPublishedAt(): Promise<Date | null>;
   createRun(actorId: number, options: SolveOptions): Promise<Run | null>;
   updateRun(
     id: number,
@@ -100,7 +102,14 @@ export type AuditRow = {
   after: unknown;
   createdAt: Date;
 };
+export type AuditFilter = {
+  actorId?: number;
+  /** 操作名の先頭一致（例: 'assign.' で割り当て関連すべて） */
+  actionPrefix?: string;
+  from?: Date;
+  to?: Date;
+};
 export interface AuditStore {
   /** 新しい順。before を指定するとその id より古いものを返す */
-  listAudit(limit: number, before?: number): Promise<AuditRow[]>;
+  listAudit(limit: number, before?: number, filter?: AuditFilter): Promise<AuditRow[]>;
 }
