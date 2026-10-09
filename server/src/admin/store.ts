@@ -229,6 +229,51 @@ export function createAdminStore(db: Db): AdminStore {
     listUsers: () => loadUsers(db),
     listDepartments: () => db.select().from(departments).orderBy(departments.id),
 
+    createDepartment: (name, actorId) =>
+      db.transaction(async (tx) => {
+        const [dup] = await tx.select().from(departments).where(eq(departments.name, name));
+        if (dup) return null;
+        const [row] = await tx.insert(departments).values({ name }).returning();
+        await tx.insert(posts).values({ departmentId: row!.id, name: '全体' });
+        await audit(tx, actorId, 'department.create', `department:${row!.id}`, null, row);
+        return row!;
+      }),
+
+    renameDepartment: (id, name, actorId) =>
+      db.transaction(async (tx) => {
+        const [before] = await tx.select().from(departments).where(eq(departments.id, id));
+        if (!before) return null;
+        const [dup] = await tx.select().from(departments).where(eq(departments.name, name));
+        if (dup && dup.id !== id) return 'name_taken';
+        const [after] = await tx
+          .update(departments)
+          .set({ name })
+          .where(eq(departments.id, id))
+          .returning();
+        await audit(tx, actorId, 'department.update', `department:${id}`, before, after);
+        return after!;
+      }),
+
+    deleteDepartment: (id, actorId) =>
+      db.transaction(async (tx) => {
+        const [before] = await tx.select().from(departments).where(eq(departments.id, id));
+        if (!before) return 'not_found';
+        const [role] = await tx
+          .select()
+          .from(userRoles)
+          .where(eq(userRoles.departmentId, id))
+          .limit(1);
+        const [slot] = await tx
+          .select()
+          .from(shiftSlots)
+          .where(eq(shiftSlots.departmentId, id))
+          .limit(1);
+        if (role || slot) return 'in_use';
+        await tx.delete(departments).where(eq(departments.id, id));
+        await audit(tx, actorId, 'department.delete', `department:${id}`, before, null);
+        return 'ok';
+      }),
+
     createUser: (input, actorId) =>
       db.transaction(async (tx) => {
         const [dup] = await tx.select().from(users).where(eq(users.email, input.email)).limit(1);

@@ -636,4 +636,69 @@ describe('admin API', () => {
       expect(store.assignments[0]!.locked).toBe(false);
     });
   });
+
+  it('manages departments and refuses to delete ones in use', async () => {
+    const app = makeApp(devEnv);
+    const cookie = await loginConfirmed(app, admin.email);
+    const created = await app.request(
+      '/api/admin/departments',
+      json(cookie, 'POST', { name: '会計部' }),
+    );
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: number };
+    expect(
+      (await app.request('/api/admin/departments', json(cookie, 'POST', { name: '会計部' })))
+        .status,
+    ).toBe(409);
+    expect(
+      (await app.request('/api/admin/departments', json(cookie, 'POST', { name: ' ' }))).status,
+    ).toBe(400);
+
+    expect(
+      (await app.request(`/api/admin/departments/${id}`, json(cookie, 'PUT', { name: '経理部' })))
+        .status,
+    ).toBe(200);
+    expect(
+      (await app.request(`/api/admin/departments/${id}`, json(cookie, 'PUT', { name: '総務部' })))
+        .status,
+    ).toBe(409);
+
+    // 所属者がいる部門は削除できない
+    store.users[0]!.roles.push({ departmentId: 1, requiresAvailability: true });
+    expect((await app.request('/api/admin/departments/1', json(cookie, 'DELETE'))).status).toBe(
+      409,
+    );
+    expect((await app.request(`/api/admin/departments/${id}`, json(cookie, 'DELETE'))).status).toBe(
+      200,
+    );
+    expect((await app.request(`/api/admin/departments/${id}`, json(cookie, 'DELETE'))).status).toBe(
+      404,
+    );
+  });
+
+  it('copies slots to other days and rejects overlaps', async () => {
+    const app = makeApp(devEnv);
+    const cookie = await loginConfirmed(app, admin.email);
+    const slot = (id: number, h: number) => ({
+      id,
+      departmentId: 1,
+      postId: 1,
+      startsAt: new Date(Date.UTC(2026, 10, 1, h)),
+      endsAt: new Date(Date.UTC(2026, 10, 1, h + 1)),
+      minPeople: 1,
+      maxPeople: 2,
+    });
+    store.slots.push(slot(1, 0), slot(2, 1));
+    const copy = (body: unknown) =>
+      app.request('/api/admin/slots/copy', json(cookie, 'POST', body));
+    const res = await copy({ slotIds: [1, 2], shiftDays: [1, 2] });
+    expect(res.status).toBe(201);
+    expect(store.slots).toHaveLength(6);
+    expect(store.slots[2]!.startsAt.toISOString()).toBe('2026-11-02T00:00:00.000Z');
+    // 既にコピー済みの日へ再コピーすると重なるので、何も作らない
+    expect((await copy({ slotIds: [1], shiftDays: [1] })).status).toBe(409);
+    expect((await copy({ slotIds: [99], shiftDays: [1] })).status).toBe(404);
+    expect((await copy({ slotIds: [1], shiftDays: [0] })).status).toBe(400);
+    expect(store.slots).toHaveLength(6);
+  });
 });

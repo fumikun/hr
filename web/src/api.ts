@@ -296,3 +296,23 @@ export async function fetchMyShifts(): Promise<MyShift[]> {
   if (!res.ok) throw new Error(`シフトの取得に失敗しました (${res.status})`);
   return ((await res.json()) as { shifts: MyShift[] }).shifts;
 }
+
+Object.assign(ERROR_TEXT, { in_use: '所属者または枠がある部門は削除できません' });
+
+export const departmentApi = {
+  create: (name: string) => adminFetch<Department>('/departments', 'POST', { name }),
+  rename: (id: number, name: string) =>
+    adminFetch<Department>(`/departments/${id}`, 'PUT', { name }),
+  remove: (id: number) => adminFetch<{ ok: true }>(`/departments/${id}`, 'DELETE'),
+};
+
+export const slotCopyApi = {
+  copy: (slotIds: number[], shiftDays: number[]) =>
+    adminFetch<Slot[]>('/slots/copy', 'POST', { slotIds, shiftDays }),
+};
+
+export const adminAvailabilityApi = {
+  get: (userId: number) => adminFetch<AvailabilityData>(`/users/${userId}/availability`),
+  save: (userId: number, entries: AvailabilityEntryDto[]) =>
+    adminFetch<{ ok: true }>(`/users/${userId}/availability`, 'PUT', { entries }),
+};

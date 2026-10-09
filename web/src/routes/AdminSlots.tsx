@@ -1,7 +1,9 @@
 import { useId, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { useLoaderData, useRevalidator } from 'react-router';
 import {
   slotApi,
+  slotCopyApi,
   type AdminUser,
   type Department,
   type Post,
@@ -165,6 +167,91 @@ function Editor({
         <Button type="submit">保存</Button>
       </div>
     </form>
+  );
+}
+
+/** この日の枠（部門内すべての持ち場）を、他の日にコピーする */
+function CopyDay({ date, slots, onDone }: { date: string; slots: Slot[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState<string[]>([]);
+  const [pick, setPick] = useState('');
+  const [error, setError] = useState('');
+
+  const dayDiff = (to: string) =>
+    Math.round(
+      (new Date(`${to}T00:00`).getTime() - new Date(`${date}T00:00`).getTime()) / 86_400_000,
+    );
+
+  async function run() {
+    setError('');
+    try {
+      await slotCopyApi.copy(
+        slots.map((s) => s.id),
+        targets.map(dayDiff),
+      );
+      toast.success(`${slots.length * targets.length} 枠をコピーしました`);
+      setOpen(false);
+      setTargets([]);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={slots.length === 0}
+        onClick={() => setOpen(true)}
+      >
+        この日の枠を他の日にコピー
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{date} の枠をコピー</DialogTitle>
+            <DialogDescription>
+              この日の {slots.length}{' '}
+              枠（全持ち場）を、同じ時刻・人数で選んだ日に複製します。既存の枠と重なる日があると、何もコピーしません。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2">
+            <Input type="date" value={pick} onChange={(e) => setPick(e.target.value)} />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!pick || pick === date || targets.includes(pick)}
+              onClick={() => {
+                setTargets([...targets, pick].sort());
+                setPick('');
+              }}
+            >
+              追加
+            </Button>
+          </div>
+          <ul className="flex flex-wrap gap-2">
+            {targets.map((t) => (
+              <li key={t} className="flex items-center gap-1 rounded border px-2 py-0.5 text-sm">
+                {t}
+                <button
+                  type="button"
+                  aria-label={`${t}を外す`}
+                  onClick={() => setTargets(targets.filter((x) => x !== t))}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          {error && <ErrorAlert>{error}</ErrorAlert>}
+          <Button disabled={targets.length === 0} onClick={() => void run()}>
+            {targets.length} 日にコピー
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -382,7 +469,7 @@ export function AdminSlots() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <h1 className="text-2xl font-bold">部門・シフト枠設定</h1>
 
       <div role="tablist" className="flex flex-wrap gap-2">
@@ -429,7 +516,8 @@ export function AdminSlots() {
             {d.slice(5)}
           </Button>
         ))}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
+          <CopyDay date={date} slots={daySlots} onDone={refresh} />
           <Button
             size="sm"
             variant="outline"

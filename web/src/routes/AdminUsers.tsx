@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLoaderData, useRevalidator } from 'react-router';
+import { Link, useLoaderData, useRevalidator } from 'react-router';
 import {
   adminApi,
   CsvImportError,
@@ -274,7 +274,7 @@ export function AdminUsers() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">ユーザー管理</h1>
         <Button onClick={() => setEditing('new')}>ユーザーを追加</Button>
@@ -341,6 +341,9 @@ export function AdminUsers() {
                   {toHours(u.targetMinutes) || '-'} / {toHours(u.maxMinutes) || '-'}
                 </TableCell>
                 <TableCell className="space-x-2 text-right whitespace-nowrap">
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={`/admin/users/${u.id}/availability`}>希望</Link>
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => setEditing(u)}>
                     編集
                   </Button>

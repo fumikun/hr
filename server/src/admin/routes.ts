@@ -64,6 +64,23 @@ const generateBody = z
   })
   .refine(minLeMax, { message: 'minPeople must be <= maxPeople', path: ['minPeople'] });
 
+const departmentBody = z.object({ name: z.string().trim().min(1).max(50) });
+
+const copyBody = z.object({
+  slotIds: z.array(z.number().int()).min(1).max(500),
+  shiftDays: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(-60)
+        .max(60)
+        .refine((n) => n !== 0),
+    )
+    .min(1)
+    .max(30),
+});
+
 const postBody = z
   .object({
     name: z.string().trim().min(1).max(50),
@@ -94,6 +111,25 @@ export function adminRoutes(
       .route('/', availabilityAdminRoutes(store, actorId))
       .route('/', assignRoutes(store, runner, actorId))
       .get('/departments', async (c) => c.json(await store.listDepartments()))
+      .post('/departments', zValidator('json', departmentBody), async (c) => {
+        const created = await store.createDepartment(c.req.valid('json').name, actorId(c));
+        return created ? c.json(created, 201) : c.json({ error: 'name_taken' }, 409);
+      })
+      .put('/departments/:id{[0-9]+}', zValidator('json', departmentBody), async (c) => {
+        const result = await store.renameDepartment(
+          Number(c.req.param('id')),
+          c.req.valid('json').name,
+          actorId(c),
+        );
+        if (result === 'name_taken') return c.json({ error: 'name_taken' }, 409);
+        return result ? c.json(result) : c.json({ error: 'not_found' }, 404);
+      })
+      .delete('/departments/:id{[0-9]+}', async (c) => {
+        const result = await store.deleteDepartment(Number(c.req.param('id')), actorId(c));
+        if (result === 'not_found') return c.json({ error: 'not_found' }, 404);
+        if (result === 'in_use') return c.json({ error: 'in_use' }, 409);
+        return c.json({ ok: true });
+      })
       .get('/posts', async (c) => {
         const dept = c.req.query('departmentId');
         return c.json(await store.listPosts(dept ? Number(dept) : undefined));
@@ -139,6 +175,26 @@ export function adminRoutes(
         if (findOverlaps([...existing, ...generated]).length > 0)
           return c.json({ error: 'overlap' }, 409);
         return c.json(await store.createSlots(generated, actorId(c)), 201);
+      })
+      // 選んだ枠を、指定した日数だけずらして複製する（複数日の開催で同じ構成を使い回す）
+      .post('/slots/copy', zValidator('json', copyBody), async (c) => {
+        const { slotIds, shiftDays } = c.req.valid('json');
+        const all = await store.listSlots();
+        const sources = slotIds.map((id) => all.find((s) => s.id === id));
+        if (sources.some((s) => !s)) return c.json({ error: 'not_found' }, 404);
+        const day = 86_400_000;
+        const copies = [...new Set(shiftDays)].flatMap((n) =>
+          sources.map((s) => ({
+            departmentId: s!.departmentId,
+            postId: s!.postId,
+            startsAt: new Date(s!.startsAt.getTime() + n * day),
+            endsAt: new Date(s!.endsAt.getTime() + n * day),
+            minPeople: s!.minPeople,
+            maxPeople: s!.maxPeople,
+          })),
+        );
+        if (findOverlaps([...all, ...copies]).length > 0) return c.json({ error: 'overlap' }, 409);
+        return c.json(await store.createSlots(copies, actorId(c)), 201);
       })
       .post(
         '/slots',

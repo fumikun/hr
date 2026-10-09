@@ -17,6 +17,15 @@ export interface AdminStore
   extends SlotStore, PostStore, AvailabilityStore, AssignStore, AuditStore {
   listUsers(): Promise<AdminUser[]>;
   listDepartments(): Promise<Department[]>;
+  /** 既定の持ち場「全体」も一緒に作る。同名があれば null */
+  createDepartment(name: string, actorId: number): Promise<Department | null>;
+  renameDepartment(
+    id: number,
+    name: string,
+    actorId: number,
+  ): Promise<Department | 'name_taken' | null>;
+  /** 所属者か枠がある部門は削除できない */
+  deleteDepartment(id: number, actorId: number): Promise<'ok' | 'not_found' | 'in_use'>;
   /** メールが既に登録済みなら null */
   createUser(input: UserInput, actorId: number): Promise<AdminUser | null>;
   updateUser(id: number, input: UserInput, actorId: number): Promise<AdminUser | null>;

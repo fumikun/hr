@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLoaderData, useRevalidator } from 'react-router';
+import { useLoaderData, useParams, useRevalidator } from 'react-router';
 import { toast } from 'sonner';
-import { availabilityApi, type AvailabilityData } from '../api';
+import { adminAvailabilityApi, availabilityApi, type AvailabilityData } from '../api';
 import { paint, rowOf, type PaintEntry } from '../lib/paint';
 import {
   AvailabilityGrid,
@@ -46,7 +46,10 @@ const sameEntries = (a: PaintEntry[], b: PaintEntry[]) => {
 };
 
 export function Availability() {
-  const data = useLoaderData<AvailabilityData>();
+  const data = useLoaderData<AvailabilityData & { userName?: string }>();
+  // /admin/users/:userId/availability では、管理者が受付期間に関係なく代理で入力する
+  const { userId } = useParams();
+  const proxyFor = userId ? Number(userId) : null;
   const { revalidate } = useRevalidator();
   const [saved, setSaved] = useState(() => toEntries(data));
   const [entries, setEntries] = useState(saved);
@@ -55,7 +58,7 @@ export function Availability() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const dirty = !sameEntries(entries, saved);
-  const editable = data.open;
+  const editable = proxyFor !== null || data.open;
 
   // 保存せずにページを離れるときの確認
   useEffect(() => {
@@ -118,14 +121,14 @@ export function Availability() {
     setBusy(true);
     setError('');
     try {
-      await availabilityApi.save(
-        entries.map((e) => ({
-          type: e.type,
-          departmentId: e.departmentId,
-          startsAt: new Date(e.start).toISOString(),
-          endsAt: new Date(e.end).toISOString(),
-        })),
-      );
+      const dto = entries.map((e) => ({
+        type: e.type,
+        departmentId: e.departmentId,
+        startsAt: new Date(e.start).toISOString(),
+        endsAt: new Date(e.end).toISOString(),
+      }));
+      if (proxyFor !== null) await adminAvailabilityApi.save(proxyFor, dto);
+      else await availabilityApi.save(dto);
       setSaved(entries);
       toast.success('希望を保存しました。受付期間内は何度でも修正できます。');
       void revalidate();
@@ -137,12 +140,18 @@ export function Availability() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-bold">シフト希望入力</h1>
-        <Badge variant={editable ? 'default' : 'secondary'}>
-          {editable ? '受付中' : '受付期間外'}
-        </Badge>
+        <h1 className="text-2xl font-bold">
+          {proxyFor === null ? 'シフト希望入力' : `${data.userName ?? ''}さんのシフト希望`}
+        </h1>
+        {proxyFor !== null ? (
+          <Badge variant="outline">管理者による代理入力</Badge>
+        ) : (
+          <Badge variant={editable ? 'default' : 'secondary'}>
+            {editable ? '受付中' : '受付期間外'}
+          </Badge>
+        )}
       </div>
       <p className="text-muted-foreground text-sm">
         受付期間: {fmtDateTime(data.period.opensAt)} 〜 {fmtDateTime(data.period.closesAt)}
@@ -168,7 +177,7 @@ export function Availability() {
             灰色の帯はその部門にシフト枠がある時間です。
           </p>
 
-          <div className="bg-background sticky top-0 z-30 flex flex-wrap items-center gap-2 rounded-lg border p-2">
+          <div className="bg-background sticky top-12 z-30 lg:top-0 flex flex-wrap items-center gap-2 rounded-lg border p-2">
             <span className="text-sm font-medium">ペン:</span>
             {(
               [

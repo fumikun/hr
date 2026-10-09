@@ -50,6 +50,28 @@ async function save(
   return c.json({ ok: true });
 }
 
+/** 画面に必要な情報（受付期間・希望入力が必要な部門とその枠・保存済みの希望）をまとめる */
+async function buildView(store: AvailabilityStore & AvailabilityContext, id: number) {
+  const [period, roles, mine, departments, allSlots] = await Promise.all([
+    store.getPeriod(),
+    store.getUserRoles(id),
+    store.getAvailability(id),
+    store.listDepartments(),
+    store.listSlots(),
+  ]);
+  // 希望入力が必要な部門だけを返す（入力不要の部門は画面に出さない）
+  const needed = (roles ?? []).filter((r) => r.requiresAvailability).map((r) => r.departmentId);
+  return {
+    period,
+    open: isPeriodOpen(period, new Date()),
+    departments: departments.filter((d) => needed.includes(d.id)),
+    slots: allSlots
+      .filter((s) => needed.includes(s.departmentId))
+      .map((s) => ({ departmentId: s.departmentId, startsAt: s.startsAt, endsAt: s.endsAt })),
+    ...mine,
+  };
+}
+
 /** 一般ユーザー: 自分の希望の閲覧・保存（受付期間内のみ保存可） */
 export function availabilityUserRoutes(
   store: AvailabilityStore & AvailabilityContext,
@@ -57,25 +79,8 @@ export function availabilityUserRoutes(
 ) {
   return new Hono()
     .get('/availability', async (c) => {
-      const id = userId(c);
-      const [period, roles, mine, departments, allSlots] = await Promise.all([
-        store.getPeriod(),
-        store.getUserRoles(id),
-        store.getAvailability(id),
-        store.listDepartments(),
-        store.listSlots(),
-      ]);
-      // 希望入力が必要な部門だけを返す（入力不要の部門は画面に出さない）
-      const needed = (roles ?? []).filter((r) => r.requiresAvailability).map((r) => r.departmentId);
-      return c.json({
-        period,
-        open: isPeriodOpen(period, new Date()),
-        departments: departments.filter((d) => needed.includes(d.id)),
-        slots: allSlots
-          .filter((s) => needed.includes(s.departmentId))
-          .map((s) => ({ departmentId: s.departmentId, startsAt: s.startsAt, endsAt: s.endsAt })),
-        ...mine,
-      });
+      const view = await buildView(store, userId(c));
+      return c.json(view);
     })
     .put('/availability', zValidator('json', entriesBody), async (c) => {
       if (!isPeriodOpen(await store.getPeriod(), new Date()))
@@ -85,7 +90,10 @@ export function availabilityUserRoutes(
 }
 
 /** 管理者: 受付期間、入力状況、任意ユーザーの希望（期間外でも編集可） */
-export function availabilityAdminRoutes(store: AvailabilityStore, actorId: (c: Context) => number) {
+export function availabilityAdminRoutes(
+  store: AvailabilityStore & AvailabilityContext,
+  actorId: (c: Context) => number,
+) {
   return new Hono()
     .get('/settings/availability-period', async (c) => c.json(await store.getPeriod()))
     .put('/settings/availability-period', zValidator('json', periodBody), async (c) => {
@@ -97,7 +105,7 @@ export function availabilityAdminRoutes(store: AvailabilityStore, actorId: (c: C
     .get('/users/:id{[0-9]+}/availability', async (c) => {
       const id = Number(c.req.param('id'));
       if (!(await store.getUserRoles(id))) return c.json({ error: 'not_found' }, 404);
-      return c.json(await store.getAvailability(id));
+      return c.json(await buildView(store, id));
     })
     .put('/users/:id{[0-9]+}/availability', zValidator('json', entriesBody), async (c) =>
       save(store, c, Number(c.req.param('id')), c.req.valid('json').entries, actorId(c)),

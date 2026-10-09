@@ -69,7 +69,7 @@ export function AdminPrint() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <div className="flex flex-wrap items-center gap-2 print:hidden">
         <h1 className="mr-auto text-2xl font-bold">印刷・出力</h1>
         {(

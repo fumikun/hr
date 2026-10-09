@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLoaderData, useRevalidator } from 'react-router';
+import { Link, useLoaderData, useRevalidator } from 'react-router';
 import { toast } from 'sonner';
 import { periodApi, type InputStatus, type Period } from '../api';
 import { ErrorAlert, Page } from '@/components/Page';
@@ -59,7 +59,7 @@ export function AdminAvailability() {
   );
 
   return (
-    <Page wide back>
+    <Page wide>
       <h1 className="text-2xl font-bold">希望入力の受付・状況</h1>
       <Card>
         <CardHeader>
@@ -116,6 +116,7 @@ export function AdminAvailability() {
               <TableHead>状況</TableHead>
               <TableHead>最終保存</TableHead>
               <TableHead>入力数</TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -134,11 +135,18 @@ export function AdminAvailability() {
                 </TableCell>
                 <TableCell>{fmt(s.submittedAt)}</TableCell>
                 <TableCell>{s.entryCount}</TableCell>
+                <TableCell className="text-right">
+                  {s.required && (
+                    <Button asChild size="sm" variant="outline">
+                      <Link to={`/admin/users/${s.userId}/availability`}>代理入力</Link>
+                    </Button>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground text-center">
+                <TableCell colSpan={6} className="text-muted-foreground text-center">
                   該当する人はいません
                 </TableCell>
               </TableRow>

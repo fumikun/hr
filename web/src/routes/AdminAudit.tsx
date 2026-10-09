@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLoaderData } from 'react-router';
 import { auditApi, type AuditRow } from '../api';
 import { ErrorAlert, Page } from '@/components/Page';
+import { ACTION } from '../lib/auditLabels';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -11,29 +12,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-
-const ACTION: Record<string, string> = {
-  'user.create': 'ユーザー追加',
-  'user.update': 'ユーザー編集',
-  'user.delete': 'ユーザー削除',
-  'user.import': 'ユーザーCSV取込',
-  'slot.create': '枠の作成',
-  'slot.update': '枠の編集',
-  'slot.delete': '枠の削除',
-  'post.create': '持ち場の追加',
-  'post.update': '持ち場の編集',
-  'post.delete': '持ち場の削除',
-  'settings.availability_period': '希望の受付期間を変更',
-  'availability.save': '希望を保存',
-  'availability.admin_edit': '希望を管理者が編集',
-  'assign.run': '自動割り当て',
-  'assign.add': '割り当てを追加',
-  'assign.remove': '割り当てを削除',
-  'assign.lock': '割り当てを固定',
-  'assign.unlock': '固定を解除',
-  'assign.confirm': 'シフトを確定',
-  'assign.unconfirm': '確定を解除',
-};
 
 const brief = (v: unknown) => (v == null ? '' : JSON.stringify(v));
 
@@ -54,7 +32,7 @@ export function AdminAudit() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <h1 className="text-2xl font-bold">操作履歴</h1>
       <div className="bg-card overflow-x-auto rounded-lg border">
         <Table>

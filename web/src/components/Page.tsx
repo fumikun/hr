@@ -1,23 +1,12 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
 
-export function Page({
-  children,
-  wide,
-  back,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-  back?: boolean;
-}) {
+export function Page({ children, wide }: { children: ReactNode; wide?: boolean }) {
   return (
-    <main className={cn('mx-auto w-full space-y-4 px-4 py-8', wide ? 'max-w-5xl' : 'max-w-md')}>
-      {back && (
-        <Link to="/" className="text-muted-foreground text-sm hover:underline print:hidden">
-          ← ホーム
-        </Link>
-      )}
+    <main
+      id="main"
+      className={cn('mx-auto w-full space-y-4 px-4 py-6 lg:py-8', wide ? 'max-w-6xl' : 'max-w-md')}
+    >
       {children}
     </main>
   );

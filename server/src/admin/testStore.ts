@@ -19,6 +19,7 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
 } {
   const users = [...initial];
   let nextId = Math.max(0, ...users.map((u) => u.id)) + 1;
+  const departments = testDepartments.map((d) => ({ ...d }));
   const slots: Slot[] = [];
   const assignments: AssignmentRow[] = [];
   const runs: Run[] = [];
@@ -198,7 +199,32 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
       return Promise.resolve(i >= 0);
     },
     listUsers: () => Promise.resolve([...users]),
-    listDepartments: () => Promise.resolve(testDepartments),
+    listDepartments: () => Promise.resolve([...departments]),
+    createDepartment: (name: string) => {
+      if (departments.some((d) => d.name === name)) return Promise.resolve(null);
+      const d = { id: Math.max(0, ...departments.map((x) => x.id)) + 1, name };
+      departments.push(d);
+      return Promise.resolve(d);
+    },
+    renameDepartment: (id: number, name: string) => {
+      const d = departments.find((x) => x.id === id);
+      if (!d) return Promise.resolve(null);
+      if (departments.some((x) => x.id !== id && x.name === name))
+        return Promise.resolve('name_taken' as const);
+      d.name = name;
+      return Promise.resolve({ ...d });
+    },
+    deleteDepartment: (id: number) => {
+      const i = departments.findIndex((x) => x.id === id);
+      if (i < 0) return Promise.resolve('not_found' as const);
+      if (
+        users.some((u) => u.roles.some((r) => r.departmentId === id)) ||
+        slots.some((s) => s.departmentId === id)
+      )
+        return Promise.resolve('in_use' as const);
+      departments.splice(i, 1);
+      return Promise.resolve('ok' as const);
+    },
     createUser: (input) => {
       if (users.some((u) => u.email === input.email)) return Promise.resolve(null);
       const user = { ...input, id: nextId++ };

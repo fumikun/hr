@@ -20,7 +20,7 @@ export function MyShifts() {
   );
 
   return (
-    <Page back>
+    <Page>
       <h1 className="text-2xl font-bold">自分のシフト</h1>
       {shifts.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm">

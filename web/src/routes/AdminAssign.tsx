@@ -375,7 +375,7 @@ export function AdminAssign() {
   }
 
   return (
-    <Page wide back>
+    <Page wide>
       <h1 className="text-2xl font-bold">自動割り当て・手動修正</h1>
       <RunPanel run={run} onFinished={refresh} />
 
