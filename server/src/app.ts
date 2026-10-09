@@ -4,6 +4,8 @@ import { createMiddleware } from 'hono/factory';
 import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
+import { adminRoutes } from './admin/routes.js';
+import type { AdminStore } from './admin/types.js';
 
 export type OnboardingRole = { departmentId: number; name: string; requiresAvailability: boolean };
 export type Onboarding = { confirmedAt: Date | null; roles: OnboardingRole[] };
@@ -14,9 +16,17 @@ export type AppDeps = {
   listUsers: () => Promise<AppUser[]>;
   getOnboarding: (userId: number) => Promise<Onboarding>;
   confirmOnboarding: (userId: number) => Promise<void>;
+  adminStore: AdminStore;
 };
 
-export function createApp({ env, findUser, listUsers, getOnboarding, confirmOnboarding }: AppDeps) {
+export function createApp({
+  env,
+  findUser,
+  listUsers,
+  getOnboarding,
+  confirmOnboarding,
+  adminStore,
+}: AppDeps) {
   const app = new Hono();
   const authConfig = createAuthConfig(env, findUser);
 
@@ -61,6 +71,15 @@ export function createApp({ env, findUser, listUsers, getOnboarding, confirmOnbo
   // 業務APIはここ以降に /api/app/* として載せる（認証＋初回確認が必須）
   app.use('/api/app/*', verifyAuth(), requireConfirmed);
   app.get('/api/app/ping', (c) => c.json({ pong: true }));
+
+  // 管理者API: 権限判定はすべてサーバー側（セッションの isAdmin は JWT 更新のたびに DB から取り直す）
+  const requireAdmin = createMiddleware(async (c, next) => {
+    const user = c.get('authUser')?.session.user as { isAdmin?: boolean } | undefined;
+    if (!user?.isAdmin) return c.json({ error: 'forbidden' }, 403);
+    await next();
+  });
+  app.use('/api/admin/*', verifyAuth(), requireConfirmed, requireAdmin);
+  app.route('/api/admin', adminRoutes(adminStore, sessionUserId));
 
   return app;
 }

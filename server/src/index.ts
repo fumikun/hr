@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { createAdminStore } from './admin/store.js';
 import { createApp } from './app.js';
 import { createDb } from './db/client.js';
 import { departments, userRoles, users } from './db/schema.js';
@@ -10,6 +11,7 @@ const { db } = createDb();
 
 const app = createApp({
   env: process.env,
+  adminStore: createAdminStore(db),
   findUser: async (email) =>
     (await db.select().from(users).where(eq(users.email, email)).limit(1))[0] ?? null,
   listUsers: () => db.select().from(users),
