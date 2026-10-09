@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { createDb } from '../db/client.js';
 import { auditLogs, departments, shiftSlots, userRoles, users } from '../db/schema.js';
+import { createAvailabilityStore } from '../availability/store.js';
 import type { AdminStore, AdminUser, UserInput } from './types.js';
 
 type Db = ReturnType<typeof createDb>['db'];
@@ -75,6 +76,7 @@ async function audit(
 
 export function createAdminStore(db: Db): AdminStore {
   return {
+    ...createAvailabilityStore(db),
     listSlots: (departmentId) =>
       db
         .select()

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "availability_submitted_at" timestamp with time zone;

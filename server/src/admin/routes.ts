@@ -1,6 +1,7 @@
 import { zValidator } from '@hono/zod-validator';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
+import { availabilityAdminRoutes } from '../availability/routes.js';
 import { parseUserCsv } from './csv.js';
 import { findOverlaps, generateSlots, isFiveMinute } from './slots.js';
 import type { AdminStore } from './types.js';
@@ -64,6 +65,7 @@ const generateBody = z
 export function adminRoutes(store: AdminStore, actorId: (c: Context) => number) {
   return (
     new Hono()
+      .route('/', availabilityAdminRoutes(store, actorId))
       .get('/departments', async (c) => c.json(await store.listDepartments()))
       .get('/slots', async (c) => {
         const dept = c.req.query('departmentId');

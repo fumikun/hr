@@ -1,3 +1,4 @@
+import type { AvailabilityEntry, InputStatus, Period } from '../availability/types.js';
 import type { AdminStore, AdminUser, Department, Slot } from './types.js';
 
 export const testDepartments: Department[] = [
@@ -6,16 +7,47 @@ export const testDepartments: Department[] = [
 ];
 
 /** テスト用のインメモリ実装 */
-export function createMemoryStore(
-  initial: AdminUser[] = [],
-): AdminStore & { users: AdminUser[]; slots: Slot[] } {
+export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
+  users: AdminUser[];
+  slots: Slot[];
+  avail: Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>;
+  setPeriodDirect: (p: Period) => void;
+} {
   const users = [...initial];
   let nextId = Math.max(0, ...users.map((u) => u.id)) + 1;
   const slots: Slot[] = [];
+  let period: Period = { opensAt: null, closesAt: null };
+  const avail = new Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>();
   let nextSlotId = 1;
   return {
     users,
     slots,
+    avail,
+    setPeriodDirect: (p: Period) => {
+      period = p;
+    },
+    getPeriod: () => Promise.resolve(period),
+    setPeriod: (p) => {
+      period = p;
+      return Promise.resolve();
+    },
+    getUserRoles: (id) => Promise.resolve(users.find((u) => u.id === id)?.roles ?? null),
+    getAvailability: (id) => Promise.resolve(avail.get(id) ?? { submittedAt: null, entries: [] }),
+    replaceAvailability: (id, entries) => {
+      avail.set(id, { submittedAt: new Date(), entries });
+      return Promise.resolve();
+    },
+    listInputStatus: () =>
+      Promise.resolve(
+        users.map((u): InputStatus => ({
+          userId: u.id,
+          name: u.name,
+          email: u.email,
+          required: u.roles.some((r) => r.requiresAvailability),
+          submittedAt: avail.get(u.id)?.submittedAt ?? null,
+          entryCount: avail.get(u.id)?.entries.length ?? 0,
+        })),
+      ),
     listSlots: (dept) =>
       Promise.resolve(slots.filter((s) => dept === undefined || s.departmentId === dept)),
     createSlots: (inputs) => {

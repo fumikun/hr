@@ -1,3 +1,5 @@
+import type { AvailabilityStore } from '../availability/types.js';
+
 export type Department = { id: number; name: string };
 export type RoleInput = { departmentId: number; requiresAvailability: boolean };
 export type UserInput = {
@@ -10,7 +12,7 @@ export type UserInput = {
 };
 export type AdminUser = UserInput & { id: number };
 
-export interface AdminStore extends SlotStore {
+export interface AdminStore extends SlotStore, AvailabilityStore {
   listUsers(): Promise<AdminUser[]>;
   listDepartments(): Promise<Department[]>;
   /** メールが既に登録済みなら null */

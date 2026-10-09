@@ -23,6 +23,8 @@ export const users = pgTable('users', {
   targetMinutes: integer('target_minutes'),
   maxMinutes: integer('max_minutes'),
   firstLoginConfirmedAt: timestamp('first_login_confirmed_at', { withTimezone: true }),
+  // 希望入力を一度でも保存した日時（未入力＝全時間帯「入れる」と区別して入力状況を出すため）
+  availabilitySubmittedAt: timestamp('availability_submitted_at', { withTimezone: true }),
 });
 
 export const departments = pgTable('departments', {

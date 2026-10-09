@@ -4,6 +4,7 @@ import { createMiddleware } from 'hono/factory';
 import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
+import { availabilityUserRoutes } from './availability/routes.js';
 import { adminRoutes } from './admin/routes.js';
 import type { AdminStore } from './admin/types.js';
 
@@ -71,6 +72,7 @@ export function createApp({
   // 業務APIはここ以降に /api/app/* として載せる（認証＋初回確認が必須）
   app.use('/api/app/*', verifyAuth(), requireConfirmed);
   app.get('/api/app/ping', (c) => c.json({ pong: true }));
+  app.route('/api/app', availabilityUserRoutes(adminStore, sessionUserId));
 
   // 管理者API: 権限判定はすべてサーバー側（セッションの isAdmin は JWT 更新のたびに DB から取り直す）
   const requireAdmin = createMiddleware(async (c, next) => {

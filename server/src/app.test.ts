@@ -295,4 +295,106 @@ describe('admin API', () => {
     const cookie = await loginConfirmed(app, general.email);
     expect((await app.request('/api/admin/slots', { headers: { cookie } })).status).toBe(403);
   });
+
+  describe('availability', () => {
+    const entry = (over: object = {}) => ({
+      type: 'want',
+      departmentId: 1,
+      startsAt: '2026-11-01T09:00:00+09:00',
+      endsAt: '2026-11-01T10:00:00+09:00',
+      ...over,
+    });
+    const setup = async (user: AppUser, open: boolean) => {
+      const app = makeApp(devEnv);
+      store.users.push({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isAdmin: user.isAdmin,
+        targetMinutes: null,
+        maxMinutes: null,
+        roles: [{ departmentId: 1, requiresAvailability: true }],
+      });
+      const now = Date.now();
+      store.setPeriodDirect({
+        opensAt: new Date(now + (open ? -3_600_000 : 3_600_000)),
+        closesAt: new Date(now + 7_200_000),
+      });
+      return { app, cookie: await loginConfirmed(app, user.email) };
+    };
+
+    it('lets a user save and re-save during the period, replacing entries', async () => {
+      const { app, cookie } = await setup(general, true);
+      const put = (entries: unknown[]) =>
+        app.request('/api/app/availability', json(cookie, 'PUT', { entries }));
+      expect(
+        (
+          await put([
+            entry(),
+            entry({
+              type: 'ng',
+              departmentId: null,
+              startsAt: '2026-11-01T12:00:00+09:00',
+              endsAt: '2026-11-01T13:00:00+09:00',
+            }),
+          ])
+        ).status,
+      ).toBe(200);
+      expect((await put([entry({ type: 'ok' })])).status).toBe(200);
+      const got = (await (
+        await app.request('/api/app/availability', { headers: { cookie } })
+      ).json()) as { submittedAt: string | null };
+      expect(got).toMatchObject({ open: true, entries: [{ type: 'ok' }] });
+      expect(got.submittedAt).not.toBeNull();
+    });
+
+    it('rejects saving outside the period', async () => {
+      const { app, cookie } = await setup(general, false);
+      const res = await app.request('/api/app/availability', json(cookie, 'PUT', { entries: [] }));
+      expect(res.status).toBe(403);
+      expect(store.avail.size).toBe(0);
+    });
+
+    it('rejects invalid entries without saving', async () => {
+      const { app, cookie } = await setup(general, true);
+      const res = await app.request(
+        '/api/app/availability',
+        json(cookie, 'PUT', { entries: [entry({ departmentId: 2 })] }),
+      );
+      expect(res.status).toBe(422);
+      expect(store.avail.size).toBe(0);
+    });
+
+    it('lets admins set the period, see status and edit anyone outside the period', async () => {
+      const { app, cookie } = await setup(general, false);
+      const adminCookie = await loginConfirmed(app, admin.email);
+      expect(
+        (await app.request('/api/admin/availability/status', { headers: { cookie } })).status,
+      ).toBe(403);
+
+      const period = { opensAt: '2026-10-12T00:00:00Z', closesAt: '2026-10-11T00:00:00Z' };
+      expect(
+        (
+          await app.request(
+            '/api/admin/settings/availability-period',
+            json(adminCookie, 'PUT', period),
+          )
+        ).status,
+      ).toBe(400);
+
+      const put = await app.request(
+        `/api/admin/users/${general.id}/availability`,
+        json(adminCookie, 'PUT', { entries: [entry()] }),
+      );
+      expect(put.status).toBe(200);
+      const status = (await (
+        await app.request('/api/admin/availability/status', { headers: { cookie: adminCookie } })
+      ).json()) as { userId: number; entryCount: number }[];
+      expect(status.find((s) => s.userId === general.id)?.entryCount).toBe(1);
+      const missing = await app.request('/api/admin/users/999/availability', {
+        headers: { cookie: adminCookie },
+      });
+      expect(missing.status).toBe(404);
+    });
+  });
 });
