@@ -6,12 +6,14 @@ import {
   auditLogs,
   availabilities,
   postMembers,
+  scopeSettings,
   settings,
   posts,
   shiftSlots,
   userRoles,
   users,
 } from '../db/schema.js';
+import { isSlotTargeted, jstDay, type ScopeContext } from '../scope/resolve.js';
 import type { AssignStore, AuditStore, Run, RunSummary } from './types.js';
 
 type Db = ReturnType<typeof createDb>['db'];
@@ -79,18 +81,42 @@ export function createAssignStore(db: Db): AssignStore & AuditStore {
       }),
 
     async loadSolveInput() {
-      const [us, roles, ps, members, slots, avs, locked] = await Promise.all([
-        db.select().from(users),
-        db.select().from(userRoles),
-        db.select().from(posts),
-        db.select().from(postMembers),
-        db.select().from(shiftSlots),
-        db.select().from(availabilities),
-        db
-          .select()
-          .from(assignments)
-          .where(or(eq(assignments.locked, true), eq(assignments.status, 'confirmed'))),
-      ]);
+      const [us, roles, ps, members, allSlots, avs, locked, scopeRows, savedDays, periodRow] =
+        await Promise.all([
+          db.select().from(users),
+          db.select().from(userRoles),
+          db.select().from(posts),
+          db.select().from(postMembers),
+          db.select().from(shiftSlots),
+          db.select().from(availabilities),
+          db
+            .select()
+            .from(assignments)
+            .where(or(eq(assignments.locked, true), eq(assignments.status, 'confirmed'))),
+          db.select().from(scopeSettings),
+          db.select().from(settings).where(eq(settings.key, 'event_days')),
+          db.select().from(settings).where(eq(settings.key, 'availability_period')),
+        ]);
+      // 調整の対象日でない枠は、割り当ての対象にしない（持ち場 → 部門 → 全体の順に対象日を決める）
+      const period = periodRow[0]?.value as
+        { opensAt: string | null; closesAt: string | null } | undefined;
+      const ctx: ScopeContext = {
+        global: {
+          opensAt: period?.opensAt ? new Date(period.opensAt) : null,
+          closesAt: period?.closesAt ? new Date(period.closesAt) : null,
+        },
+        eventDays: savedDays[0]
+          ? (savedDays[0].value as string[])
+          : [...new Set(allSlots.map((s) => jstDay(s.startsAt)))].sort(),
+        scopes: scopeRows.map((r) => ({
+          type: r.scopeType as 'department' | 'post',
+          id: r.scopeId,
+          opensAt: r.opensAt,
+          closesAt: r.closesAt,
+          days: r.days,
+        })),
+      };
+      const slots = allSlots.filter((s) => isSlotTargeted(ctx, s));
       return {
         users: us.map((u) => ({
           id: u.id,

@@ -12,7 +12,7 @@ type HighsLoader = () => Promise<{
 const highsLoader = highsModule as unknown as HighsLoader;
 
 /** 目的関数の重み（1時間あたり）。不足の解消 ≫ 上限超過 ≫ 目標との差 > 希望 > 偏り */
-export const WEIGHTS = { shortage: 50, maxExceed: 40, targetDev: 2, want: 1.5, balance: 0.3 };
+export const WEIGHTS = { shortage: 50, maxExceed: 40, targetDev: 2, want: 1.5, balance: 3 };
 
 const HOUR = 3_600_000;
 const term = (c: number, v: string) => `${c < 0 ? '-' : '+'} ${Math.abs(c)} ${v}`;
@@ -118,10 +118,29 @@ export async function solve(input: SolveInput, options: SolveOptions = {}): Prom
       obj.push(term(WEIGHTS.maxExceed, ex));
       cons.push(`cmax${n++}: ${hoursExpr} - 1 ${ex} <= ${user.maxMinutes / 60 - base}`);
     }
-    cons.push(`bal${n++}: ${hoursExpr} - 1 maxh <= ${-base}`);
   }
-  bounds.push('0 <= maxh');
-  obj.push(term(WEIGHTS.balance, 'maxh'));
+
+  // 労働時間の均一化は部門ごとに行う。各部門で、その部門の枠に入れる人どうしの
+  // 「その部門での総労働時間」の差（最大 − 最小）を小さくする。
+  // 掛け持ちの人の時間は部門ごとに別々に数えるので、部門をまたいで合計をそろえることはしない。
+  const departmentsInPlay = new Set(vars.map((v) => slotById.get(v.slotId)!.departmentId));
+  for (const deptId of departmentsInPlay) {
+    const inDept = vars.filter((v) => slotById.get(v.slotId)!.departmentId === deptId);
+    const members = new Set(inDept.map((v) => v.userId));
+    const hi = `maxh_${deptId}`;
+    const lo = `minh_${deptId}`;
+    bounds.push(`0 <= ${hi}`, `0 <= ${lo}`);
+    obj.push(term(WEIGHTS.balance, hi), term(-WEIGHTS.balance, lo));
+    for (const userId of members) {
+      const mine = inDept.filter((v) => v.userId === userId);
+      const fixed = (lockedBy.get(userId) ?? []).reduce((acc, l) => {
+        const slot = slotById.get(l.slotId);
+        return slot && slot.departmentId === deptId ? acc + (slot.end - slot.start) / HOUR : acc;
+      }, 0);
+      cons.push(`bhi${n++}: ${sum(mine, (v) => v.hours)} - 1 ${hi} <= ${-fixed}`);
+      cons.push(`blo${n++}: ${sum(mine, (v) => v.hours)} - 1 ${lo} >= ${-fixed}`);
+    }
+  }
 
   const lp = [
     'Minimize',

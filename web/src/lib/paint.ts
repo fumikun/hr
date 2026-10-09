@@ -48,10 +48,16 @@ export function paint(
  * from の日の入力を to の日にコピーする。to の日の既存の入力は置き換える。
  * 日付の差は 24 時間単位（日本は夏時間なし）。
  */
-export function copyDay(entries: PaintEntry[], from: string, to: string): PaintEntry[] {
+export function copyDay(
+  entries: PaintEntry[],
+  from: string,
+  to: string,
+  /** 受付が終わった行は変えない（false を返した行は、コピーも置き換えもしない） */
+  canEdit: (row: number | null) => boolean = () => true,
+): PaintEntry[] {
   const shift = dayStart(to).getTime() - dayStart(from).getTime();
   const copied = entries
-    .filter((e) => dateKey(e.start) === from)
+    .filter((e) => dateKey(e.start) === from && canEdit(rowOf(e)))
     .map((e) => ({ ...e, start: e.start + shift, end: e.end + shift }));
-  return [...entries.filter((e) => dateKey(e.start) !== to), ...copied];
+  return [...entries.filter((e) => dateKey(e.start) !== to || !canEdit(rowOf(e))), ...copied];
 }

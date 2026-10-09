@@ -125,17 +125,26 @@ export function Availability() {
     }
     return m;
   }, [data.slots]);
-  const days = useMemo(
-    () => [...new Set([...shifts.keys(), ...entries.map((e) => dateKey(e.start))])].sort(),
-    [shifts, entries],
-  );
+  // 調整の対象日（部門・持ち場の設定で決まる）。対象外の日は出さない
+  const days = data.days;
   const [day, setDay] = useState(days[0] ?? '');
   const current = days.includes(day) ? day : (days[0] ?? '');
 
+  // 受付が終わった部門の行は変更できない。「入れない」は、どれかの部門が受付中なら変更できる
   const rows: GridRow[] = [
-    { row: null, label: '入れない', sub: '全部門共通' },
-    ...data.departments.map((d) => ({ row: d.id, label: d.name, sub: '入りたい／入れる' })),
+    { row: null, label: '入れない', sub: '全部門共通', locked: !editable },
+    ...data.departments.map((d) => {
+      const locked = proxyFor === null && !d.open;
+      return {
+        row: d.id,
+        label: d.name,
+        sub: locked ? '受付終了' : '入りたい／入れる',
+        locked,
+      };
+    }),
   ];
+
+  const rowLocked = (row: number | null) => rows.find((r) => r.row === row)?.locked ?? false;
 
   // 表示する時間帯: その日のシフト枠と入力済みの範囲を含む
   const dayStart = current ? dayStartOf(current).getTime() : 0;
@@ -197,13 +206,36 @@ export function Availability() {
           </Badge>
         )}
       </div>
-      <p className="text-muted-foreground text-sm">
-        受付期間: {fmtDateTime(data.period.opensAt)} 〜 {fmtDateTime(data.period.closesAt)}
-        {data.submittedAt && ` ／ 最終保存: ${fmtDateTime(data.submittedAt)}`}
-      </p>
+      <ul className="text-sm">
+        {data.departments.map((d) => (
+          <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-0.5">
+            <span className="font-medium">{d.name}</span>
+            <Badge variant={d.open ? 'default' : 'secondary'}>
+              {d.open ? '受付中' : proxyFor !== null ? '受付外' : '受付外（変更不可）'}
+            </Badge>
+            <span className="text-muted-foreground">
+              {fmtDateTime(d.opensAt)} 〜 {fmtDateTime(d.closesAt)} ／ 対象日{' '}
+              {d.days.length ? d.days.map((x) => md(x)).join('・') : 'なし'}
+            </span>
+          </li>
+        ))}
+        {data.submittedAt && (
+          <li className="text-muted-foreground">最終保存: {fmtDateTime(data.submittedAt)}</li>
+        )}
+      </ul>
       {!editable && (
         <Notice kind="info" title="受付期間外です">
           入力内容の閲覧のみ可能です。変更が必要な場合は管理者に連絡してください。
+        </Notice>
+      )}
+      {editable && proxyFor === null && data.departments.some((d) => !d.open) && (
+        <Notice kind="info">
+          受付が終わった部門（
+          {data.departments
+            .filter((d) => !d.open)
+            .map((d) => d.name)
+            .join('、')}
+          ）の入力は、変更できません。
         </Notice>
       )}
       {data.departments.length === 0 ? (
@@ -213,7 +245,7 @@ export function Availability() {
         </Notice>
       ) : days.length === 0 ? (
         <Notice kind="info">
-          まだシフト枠が作成されていません。管理者が枠を作成するまでお待ちください。
+          調整の対象日がまだ決まっていません。管理者が枠や日程を設定するまでお待ちください。
         </Notice>
       ) : (
         <>
@@ -237,6 +269,7 @@ export function Availability() {
               [
                 ['want', '入りたい'],
                 ['ok', '入れる'],
+                ['ng', '入れない'],
                 ['erase', '消す'],
               ] as const
             ).map(([t, label]) => (
@@ -332,7 +365,7 @@ export function Availability() {
                 )}
               >
                 {TYPE_LABEL[e.type]}・{deptName(rowOf(e))} {hm(e.start)}–{hm(e.end)}
-                {editable && (
+                {editable && !rowLocked(rowOf(e)) && (
                   <button
                     type="button"
                     className="ml-1 px-1 font-bold"
@@ -354,7 +387,7 @@ export function Availability() {
           {editable && (
             <ManualAdd
               key={current}
-              rows={rows}
+              rows={rows.filter((r) => !r.locked)}
               day={current}
               defaultStart={bounds.first}
               defaultEnd={bounds.last}
@@ -371,7 +404,12 @@ export function Availability() {
             days={days.filter((d) => d !== current)}
             entries={entries}
             onApply={(targets) => {
-              setEntries(targets.reduce((acc, to) => copyDay(acc, current, to), entries));
+              setEntries(
+                targets.reduce(
+                  (acc, to) => copyDay(acc, current, to, (row) => !rowLocked(row)),
+                  entries,
+                ),
+              );
               setCopyOpen(false);
             }}
           />

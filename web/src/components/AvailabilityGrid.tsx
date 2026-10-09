@@ -4,10 +4,12 @@ import { paint, rowOf, type AvailabilityType, type PaintEntry } from '../lib/pai
 
 const STEP = 5 * 60_000;
 const LABEL_PX = 112;
+const END_PX = 44; // 右端の終了時刻ラベル用
 const CELL = 30 * 60_000; // クリック／タップで塗る単位
 
-export type GridRow = { row: number | null; label: string; sub: string };
-export type Tool = 'want' | 'ok' | 'erase';
+/** locked: 受付が終わっていて変更できない行 */
+export type GridRow = { row: number | null; label: string; sub: string; locked?: boolean };
+export type Tool = 'want' | 'ok' | 'ng' | 'erase';
 
 export const TYPE_STYLE: Record<AvailabilityType, string> = {
   ng: 'border-red-500 bg-red-200/80 text-red-900',
@@ -72,10 +74,12 @@ export function AvailabilityGrid({
   const at = (clientX: number) =>
     t0 + (clientX - rowEl.current!.getBoundingClientRect().left) / msPx;
   const typeFor = (row: number | null): AvailabilityType | null =>
-    tool === 'erase' ? null : row === null ? 'ng' : tool;
+    tool === 'erase' ? null : row === null ? 'ng' : tool === 'ng' ? null : tool;
 
   function down(e: React.PointerEvent<HTMLDivElement>, row: number | null) {
-    if (disabled || e.button !== 0) return;
+    if (disabled || e.button !== 0 || rows.find((r) => r.row === row)?.locked) return;
+    // 「入れない」ペンは「入れない」行だけに塗れる
+    if (tool === 'ng' && row !== null) return;
     rowEl.current = e.currentTarget;
     e.currentTarget.setPointerCapture(e.pointerId);
     const m = snap(at(e.clientX));
@@ -112,7 +116,7 @@ export function AvailabilityGrid({
 
   return (
     <div className="bg-card overflow-x-auto rounded-lg border select-none">
-      <div style={{ width: LABEL_PX + hours.length * hourPx }}>
+      <div style={{ width: LABEL_PX + hours.length * hourPx + END_PX }}>
         <div className="flex border-b">
           <div
             className="bg-card sticky left-0 z-20 shrink-0 border-r"
@@ -127,8 +131,11 @@ export function AvailabilityGrid({
               {h}:00
             </div>
           ))}
+          <div className="text-muted-foreground border-foreground/30 box-border shrink-0 border-l px-1 py-0.5 text-xs">
+            {endHour}:00
+          </div>
         </div>
-        {rows.map(({ row, label, sub }) => (
+        {rows.map(({ row, label, sub, locked }) => (
           <div key={String(row)} className="flex border-b last:border-b-0">
             <div
               className="bg-card sticky left-0 z-10 flex shrink-0 flex-col justify-center border-r px-2 text-sm"
@@ -140,7 +147,8 @@ export function AvailabilityGrid({
             <div
               className={cn(
                 'relative h-14',
-                disabled ? 'cursor-not-allowed' : 'cursor-crosshair',
+                disabled || locked ? 'cursor-not-allowed' : 'cursor-crosshair',
+                locked && 'opacity-60',
                 touchPaint && 'touch-none',
               )}
               style={{
@@ -159,10 +167,32 @@ export function AvailabilityGrid({
                 (shifts.get(row) ?? []).map((s, i) => (
                   <div
                     key={i}
-                    className="bg-muted-foreground/15 pointer-events-none absolute inset-y-0"
+                    className="bg-muted-foreground/15 pointer-events-none absolute inset-y-0 border-r-2 border-dashed border-foreground/40"
                     style={{ left: (s.start - t0) * msPx, width: (s.end - s.start) * msPx }}
-                  />
+                  >
+                    <span className="text-muted-foreground absolute right-1 bottom-0.5 text-[10px] leading-none whitespace-nowrap">
+                      {fmt(s.start)}–{fmt(s.end)}
+                    </span>
+                  </div>
                 ))}
+              {/* 「入れない」は全部門共通なので、部門の行にも延ばして、その時間の入りたい／入れるが無効なことを示す */}
+              {row !== null &&
+                entries
+                  .filter((e) => e.type === 'ng' && e.end > t0 && e.start < t1)
+                  .map((e) => (
+                    <div
+                      key={`ng-${e.start}`}
+                      className="pointer-events-none absolute inset-y-0 border-x border-red-500/60 bg-red-200/60"
+                      style={{
+                        left: (e.start - t0) * msPx,
+                        width: (e.end - e.start) * msPx,
+                        backgroundImage:
+                          'repeating-linear-gradient(135deg, rgb(239 68 68 / 0.35) 0 4px, transparent 4px 10px)',
+                      }}
+                    >
+                      <span className="px-1 text-xs text-red-900">入れない（無効）</span>
+                    </div>
+                  ))}
               {entries
                 .filter((e) => rowOf(e) === row && e.end > t0 && e.start < t1)
                 .map((e) => (

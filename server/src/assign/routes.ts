@@ -9,7 +9,7 @@ const pairBody = z.object({ userId: z.number().int(), slotId: z.number().int() }
 const runBody = z.object({ timeLimitSeconds: z.number().int().min(5).max(300).default(60) });
 
 export function assignRoutes(
-  store: AssignStore & AuditStore,
+  store: AssignStore & AuditStore & { listSlots(): Promise<{ id: number }[]> },
   runner: AssignRunner,
   actorId: (c: Context) => number,
 ) {
@@ -47,12 +47,16 @@ export function assignRoutes(
       .get('/assign/run', async (c) => c.json(await store.latestRun()))
       // 現在の割り当て・不足枠・制約違反（手動修正後の警告にも使う）
       .get('/assign', async (c) => {
-        const [input, assignments] = await Promise.all([
+        const [input, assignments, allSlots] = await Promise.all([
           store.loadSolveInput(),
           store.listAssignments(),
+          store.listSlots(),
         ]);
+        const targeted = new Set(input.slots.map((s) => s.id));
         return c.json({
           assignments,
+          // 調整の対象日でない枠（画面には出さない）
+          excludedSlotIds: allSlots.filter((s) => !targeted.has(s.id)).map((s) => s.id),
           shortages: findShortages(input.slots, assignments),
           violations: findViolations(input, assignments),
         });

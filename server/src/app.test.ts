@@ -701,6 +701,216 @@ describe('admin API', () => {
     expect((await copy({ slotIds: [1], shiftDays: [0] })).status).toBe(400);
     expect(store.slots).toHaveLength(6);
   });
+
+  describe('scopes: per-department/post periods and target days', () => {
+    const jst = (d: string, t: string) => `${d}T${t}:00+09:00`;
+    const setup = async () => {
+      const app = makeApp(devEnv);
+      const admin = await loginConfirmed(app, 'admin@example.test');
+      store.users.push(
+        {
+          ...newUser,
+          id: 2,
+          email: general.email,
+          name: general.name,
+          roles: [
+            { departmentId: 1, requiresAvailability: true },
+            { departmentId: 2, requiresAvailability: true },
+          ],
+        },
+        {
+          ...newUser,
+          id: 10,
+          email: 'm10@example.test',
+          roles: [{ departmentId: 1, requiresAvailability: true }],
+        },
+      );
+      store.posts.push(
+        { id: 1, departmentId: 1, name: '全体', restricted: false, memberIds: [] },
+        { id: 2, departmentId: 2, name: '全体', restricted: false, memberIds: [] },
+      );
+      const slot = (id: number, departmentId: number, postId: number, day: string) => ({
+        id,
+        departmentId,
+        postId,
+        startsAt: new Date(jst(day, '09:00')),
+        endsAt: new Date(jst(day, '10:30')),
+        minPeople: 1,
+        maxPeople: 1,
+      });
+      store.slots.push(
+        slot(1, 1, 1, '2026-11-07'),
+        slot(2, 1, 1, '2026-11-08'),
+        slot(3, 2, 2, '2026-11-07'),
+      );
+      const user = await loginConfirmed(app, general.email);
+      return { app, admin, user };
+    };
+    const putScope = (
+      app: ReturnType<typeof makeApp>,
+      cookie: string,
+      path: string,
+      body: unknown,
+    ) => app.request(`/api/admin/scopes/${path}`, json(cookie, 'PUT', body));
+    const now = Date.now();
+    const iso = (h: number) => new Date(now + h * 3_600_000).toISOString();
+
+    it('validates and resolves scope settings with inheritance', async () => {
+      const { app, admin } = await setup();
+      expect(
+        (
+          await app.request(
+            '/api/admin/event-days',
+            json(admin, 'PUT', { days: ['2026-11-08', '2026-11-07'] }),
+          )
+        ).status,
+      ).toBe(200);
+
+      // 開始だけ・締切が開始より前・イベント外の日・存在しない持ち場はすべて拒否
+      expect(
+        (await putScope(app, admin, 'post/1', { opensAt: iso(-1), closesAt: null, days: null }))
+          .status,
+      ).toBe(400);
+      expect(
+        (await putScope(app, admin, 'post/1', { opensAt: iso(5), closesAt: iso(1), days: null }))
+          .status,
+      ).toBe(400);
+      expect(
+        (
+          await putScope(app, admin, 'post/1', {
+            opensAt: null,
+            closesAt: null,
+            days: ['2026-12-01'],
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (await putScope(app, admin, 'post/99', { opensAt: null, closesAt: null, days: null }))
+          .status,
+      ).toBe(404);
+
+      expect(
+        (
+          await putScope(app, admin, 'post/1', {
+            opensAt: iso(-1),
+            closesAt: iso(5),
+            days: ['2026-11-07'],
+          })
+        ).status,
+      ).toBe(200);
+      const got = (await (
+        await app.request('/api/admin/scopes', { headers: { cookie: admin } })
+      ).json()) as {
+        eventDays: string[];
+        posts: { id: number; periodFrom: string; daysFrom: string; days: string[] }[];
+        departments: { id: number; periodFrom: string; days: string[] }[];
+      };
+      expect(got.eventDays).toEqual(['2026-11-07', '2026-11-08']);
+      expect(got.posts.find((p) => p.id === 1)).toMatchObject({
+        periodFrom: 'post',
+        daysFrom: 'post',
+        days: ['2026-11-07'],
+      });
+      expect(got.posts.find((p) => p.id === 2)).toMatchObject({
+        periodFrom: 'global',
+        daysFrom: 'global',
+      });
+      expect(got.departments.find((d) => d.id === 1)).toMatchObject({ periodFrom: 'global' });
+
+      // すべて空にすると、個別設定を消して全体の設定に戻る
+      await putScope(app, admin, 'post/1', { opensAt: null, closesAt: null, days: null });
+      expect(store.scopeCount()).toBe(0);
+    });
+
+    it('lets the user edit only the departments that are open', async () => {
+      const { app, admin, user } = await setup();
+      // 全体は受付終了。部門1だけ個別に受付中にする
+      store.setPeriodDirect({ opensAt: new Date(iso(-48)), closesAt: new Date(iso(-24)) });
+      await putScope(app, admin, 'department/1', {
+        opensAt: iso(-1),
+        closesAt: iso(24),
+        days: null,
+      });
+
+      const view = (await (
+        await app.request('/api/app/availability', { headers: { cookie: user } })
+      ).json()) as {
+        open: boolean;
+        departments: { id: number; open: boolean }[];
+      };
+      expect(view.open).toBe(true);
+      expect(view.departments.map((d) => [d.id, d.open])).toEqual([
+        [1, true],
+        [2, false],
+      ]);
+
+      const entry = (departmentId: number | null, type = 'want') => ({
+        type,
+        departmentId,
+        startsAt: jst('2026-11-07', '09:00'),
+        endsAt: jst('2026-11-07', '10:00'),
+      });
+      const put = (entries: unknown[]) =>
+        app.request('/api/app/availability', json(user, 'PUT', { entries }));
+
+      // 受付中の部門1と、全部門共通の「入れない」は変更できる
+      expect((await put([entry(1)])).status).toBe(200);
+      expect((await put([entry(1), entry(null, 'ng')])).status).toBe(200);
+      // 受付が終わった部門2の入力は変更できない（どの行かも返す）
+      const denied = await put([entry(1), entry(null, 'ng'), entry(2)]);
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toMatchObject({ error: 'period_closed', rows: ['d2'] });
+      // 部門2は変えていなければ、部門1の変更と一緒に保存できる
+      expect((await put([entry(null, 'ng')])).status).toBe(200);
+    });
+
+    it('opens a department when one of its posts is open, and shows only target-day slots', async () => {
+      const { app, admin, user } = await setup();
+      store.setPeriodDirect({ opensAt: new Date(iso(-48)), closesAt: new Date(iso(-24)) });
+      // 部門2は閉じたまま、部門1の持ち場1だけを 11/7 限定で受付中にする
+      await putScope(app, admin, 'post/1', {
+        opensAt: iso(-1),
+        closesAt: iso(24),
+        days: ['2026-11-07'],
+      });
+      const view = (await (
+        await app.request('/api/app/availability', { headers: { cookie: user } })
+      ).json()) as {
+        departments: { id: number; open: boolean; days: string[] }[];
+        slots: { departmentId: number; startsAt: string }[];
+      };
+      expect(view.departments.find((d) => d.id === 1)).toMatchObject({
+        open: true,
+        days: ['2026-11-07'],
+      });
+      // 11/8 の枠(id 2)は対象外なので見えない
+      expect(view.slots.filter((s) => s.departmentId === 1)).toHaveLength(1);
+    });
+
+    it('leaves slots on non-target days out of the auto assignment', async () => {
+      const { app, admin } = await setup();
+      await putScope(app, admin, 'post/1', { opensAt: null, closesAt: null, days: ['2026-11-07'] });
+      await app.request('/api/admin/assign/run', json(admin, 'POST', {}));
+      for (let i = 0; i < 100; i++) {
+        const run = (await (
+          await app.request('/api/admin/assign/run', { headers: { cookie: admin } })
+        ).json()) as { status: string };
+        if (run.status !== 'running') break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const got = (await (
+        await app.request('/api/admin/assign', { headers: { cookie: admin } })
+      ).json()) as {
+        assignments: { slotId: number }[];
+        shortages: { slotId: number }[];
+        excludedSlotIds: number[];
+      };
+      expect(got.excludedSlotIds).toEqual([2]);
+      expect(got.assignments.map((a) => a.slotId)).not.toContain(2);
+      expect(got.shortages.map((s) => s.slotId)).not.toContain(2);
+      expect(got.assignments.map((a) => a.slotId)).toContain(1);
+    });
+  });
 });
 
 describe('user info cache', () => {

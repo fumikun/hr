@@ -17,6 +17,7 @@ import {
   fetchOnboarding,
   periodApi,
   postApi,
+  scopeApi,
   slotApi,
 } from './api';
 import './styles.css';
@@ -135,7 +136,7 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            const [period, status, slots, departments, users, assign, run, audit] =
+            const [period, status, slots, departments, users, assign, run, audit, scopes] =
               await Promise.all([
                 periodApi.get(),
                 periodApi.status(),
@@ -145,8 +146,10 @@ const router = createBrowserRouter([
                 assignApi.data(),
                 assignApi.latestRun(),
                 auditApi.list({ limit: 8 }),
+                scopeApi.get(),
               ]);
             return {
+              scopes,
               period,
               status,
               slots,
@@ -220,13 +223,15 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            const [period, status, users, departments] = await Promise.all([
+            const [period, status, users, departments, posts, scopes] = await Promise.all([
               periodApi.get(),
               periodApi.status(),
               adminApi.users(),
               adminApi.departments(),
+              postApi.list(),
+              scopeApi.get(),
             ]);
-            return { period, status, users, departments };
+            return { period, status, users, departments, posts, scopes };
           }),
       },
       {

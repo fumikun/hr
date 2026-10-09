@@ -1,3 +1,4 @@
+import type { ScopeStore } from '../scope/types.js';
 import type { AssignStore, AuditStore } from '../assign/types.js';
 import type { AvailabilityStore } from '../availability/types.js';
 
@@ -14,7 +15,7 @@ export type UserInput = {
 export type AdminUser = UserInput & { id: number };
 
 export interface AdminStore
-  extends SlotStore, PostStore, AvailabilityStore, AssignStore, AuditStore {
+  extends SlotStore, PostStore, AvailabilityStore, AssignStore, AuditStore, ScopeStore {
   listUsers(): Promise<AdminUser[]>;
   listDepartments(): Promise<Department[]>;
   /** 既定の持ち場「全体」も一緒に作る。同名があれば null */

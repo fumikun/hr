@@ -7,6 +7,7 @@ const slots = [
   { id: 2, minPeople: 1 },
 ];
 const base: AssignData = {
+  excludedSlotIds: [],
   assignments: [
     { userId: 10, slotId: 1, source: 'auto', locked: false, status: 'draft' },
     { userId: 11, slotId: 1, source: 'auto', locked: false, status: 'draft' },

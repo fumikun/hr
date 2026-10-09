@@ -199,10 +199,21 @@ export type AvailabilityEntryDto = {
   startsAt: string;
   endsAt: string;
 };
+export type AvailabilityDepartment = Department & {
+  /** 本人が入れる持ち場のどれかが受付中か */
+  open: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  /** 調整の対象日（YYYY-MM-DD） */
+  days: string[];
+};
 export type AvailabilityData = {
   period: Period;
+  /** どれかの部門が受付中 */
   open: boolean;
-  departments: Department[];
+  /** 本人が希望を入れる部門すべての対象日 */
+  days: string[];
+  departments: AvailabilityDepartment[];
   slots: { departmentId: number; startsAt: string; endsAt: string }[];
   submittedAt: string | null;
   entries: AvailabilityEntryDto[];
@@ -272,6 +283,8 @@ export type ViolationReason =
 export type Violation = { userId: number; slotId: number; reason: ViolationReason };
 export type AssignData = {
   assignments: AssignmentRow[];
+  /** 調整の対象日でない枠（画面には出さない） */
+  excludedSlotIds: number[];
   shortages: { slotId: number; missing: number }[];
   violations: Violation[];
 };
@@ -374,4 +387,42 @@ export const adminAvailabilityApi = {
   get: (userId: number) => adminFetch<AvailabilityData>(`/users/${userId}/availability`),
   save: (userId: number, entries: AvailabilityEntryDto[]) =>
     adminFetch<{ ok: true }>(`/users/${userId}/availability`, 'PUT', { entries }),
+};
+
+export type ScopeType = 'department' | 'post';
+export type ScopeSetting = {
+  type: ScopeType;
+  id: number;
+  opensAt: string | null;
+  closesAt: string | null;
+  days: string[] | null;
+};
+export type ScopeLevel = 'global' | 'department' | 'post';
+/** 引き継ぎを反映した、実際に使われる設定 */
+export type ResolvedScope = {
+  id: number;
+  opensAt: string | null;
+  closesAt: string | null;
+  days: string[];
+  periodFrom: ScopeLevel;
+  daysFrom: ScopeLevel;
+};
+export type ScopesData = {
+  eventDays: string[];
+  eventDaysSaved: boolean;
+  global: Period;
+  scopes: ScopeSetting[];
+  departments: ResolvedScope[];
+  posts: (ResolvedScope & { departmentId: number })[];
+};
+
+Object.assign(ERROR_TEXT, {
+  day_not_in_event: 'イベントの日程にない日は選べません',
+});
+
+export const scopeApi = {
+  get: () => adminFetch<ScopesData>('/scopes'),
+  setEventDays: (days: string[]) => adminFetch<{ days: string[] }>('/event-days', 'PUT', { days }),
+  set: (type: ScopeType, id: number, s: Pick<ScopeSetting, 'opensAt' | 'closesAt' | 'days'>) =>
+    adminFetch<{ ok: true }>(`/scopes/${type}/${id}`, 'PUT', s),
 };

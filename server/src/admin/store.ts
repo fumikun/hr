@@ -5,10 +5,12 @@ import {
   departments,
   postMembers,
   posts,
+  scopeSettings,
   shiftSlots,
   userRoles,
   users,
 } from '../db/schema.js';
+import { createScopeStore } from '../scope/store.js';
 import { createAssignStore } from '../assign/store.js';
 import { createAvailabilityStore } from '../availability/store.js';
 import type { AdminStore, AdminUser, Post, PostInput, UserInput } from './types.js';
@@ -134,6 +136,7 @@ export function createAdminStore(db: Db): AdminStore {
   return {
     ...createAvailabilityStore(db),
     ...createAssignStore(db),
+    ...createScopeStore(db),
     listPosts: (departmentId) => loadPosts(db, departmentId),
 
     createPost: (departmentId, input, actorId) =>
@@ -184,6 +187,9 @@ export function createAdminStore(db: Db): AdminStore {
           .limit(1);
         if (used) return 'has_slots';
         const before = (await loadPosts(tx, row.departmentId)).find((p) => p.id === id);
+        await tx
+          .delete(scopeSettings)
+          .where(and(eq(scopeSettings.scopeType, 'post'), eq(scopeSettings.scopeId, id)));
         await tx.delete(posts).where(eq(posts.id, id));
         await audit(tx, actorId, 'post.delete', `post:${id}`, before, null);
         return 'ok';
@@ -269,6 +275,9 @@ export function createAdminStore(db: Db): AdminStore {
           .where(eq(shiftSlots.departmentId, id))
           .limit(1);
         if (role || slot) return 'in_use';
+        await tx
+          .delete(scopeSettings)
+          .where(and(eq(scopeSettings.scopeType, 'department'), eq(scopeSettings.scopeId, id)));
         await tx.delete(departments).where(eq(departments.id, id));
         await audit(tx, actorId, 'department.delete', `department:${id}`, before, null);
         return 'ok';

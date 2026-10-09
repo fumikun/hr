@@ -8,6 +8,7 @@ import type {
   Department,
   InputStatus,
   Period,
+  ScopesData,
   Slot,
 } from '../api';
 import { ACTION } from '../lib/auditLabels';
@@ -15,11 +16,12 @@ import { Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { dateKey, fmtDateTime, hoursLabel, mdhm, minutesBetween } from '@/lib/datetime';
+import { dateKey, fmtDateTime, hoursLabel, md, mdhm, minutesBetween } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 
 export type DashboardData = {
   period: Period;
+  scopes: ScopesData;
   status: InputStatus[];
   slots: Slot[];
   departments: Department[];
@@ -116,11 +118,17 @@ export function AdminDashboard() {
   const now = Date.now();
   const required = d.status.filter((s) => s.required);
   const missing = required.filter((s) => !s.submittedAt);
-  const periodSet = !!(d.period.opensAt && d.period.closesAt);
-  const open =
-    periodSet &&
-    new Date(d.period.opensAt!).getTime() <= now &&
-    now < new Date(d.period.closesAt!).getTime();
+  // 受付期間は、全体の設定と、部門・持ち場ごとの個別設定の両方を見て判断する
+  const effective = [...d.scopes.departments, ...d.scopes.posts];
+  const isOpen = (r: { opensAt: string | null; closesAt: string | null }) =>
+    !!(r.opensAt && r.closesAt) &&
+    new Date(r.opensAt).getTime() <= now &&
+    now < new Date(r.closesAt).getTime();
+  const periodSet =
+    d.scopes.departments.length > 0 && d.scopes.departments.every((x) => x.opensAt && x.closesAt);
+  const open = effective.some(isOpen);
+  const overridden = d.scopes.scopes.filter((x) => x.opensAt || x.closesAt).length;
+  const days = d.scopes.eventDays;
   const shortagePeople = d.assign.shortages.reduce((n, s) => n + s.missing, 0);
   const drafts = d.assign.assignments.filter((a) => a.status === 'draft').length;
   const confirmed = d.assign.assignments.length - drafts;
@@ -164,8 +172,10 @@ export function AdminDashboard() {
     {
       title: '希望の受付期間を決める',
       detail: periodSet
-        ? `${fmtDateTime(d.period.opensAt)} 〜 ${fmtDateTime(d.period.closesAt)}`
-        : '開始と締切が未設定です',
+        ? `${fmtDateTime(d.period.opensAt)} 〜 ${fmtDateTime(d.period.closesAt)}${
+            overridden > 0 ? `（部門・持ち場の個別設定 ${overridden} 件）` : ''
+          }`
+        : '開始と締切が未設定の部門があります',
       to: '/admin/availability',
       link: '受付期間',
       done: periodSet,
@@ -303,7 +313,11 @@ export function AdminDashboard() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <p>
-              {fmtDateTime(d.period.opensAt)} 〜 {fmtDateTime(d.period.closesAt)}
+              全体: {fmtDateTime(d.period.opensAt)} 〜 {fmtDateTime(d.period.closesAt)}
+              {overridden > 0 && `（部門・持ち場の個別設定 ${overridden} 件）`}
+            </p>
+            <p className="text-muted-foreground">
+              調整する日程: {days.length ? days.map((x) => md(x)).join('・') : '未設定'}
             </p>
             {missing.length > 0 && (
               <>

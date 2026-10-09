@@ -36,6 +36,7 @@ export function withoutPair(
 ): AssignData {
   const assignments = data.assignments.filter((a) => !(a.userId === userId && a.slotId === slotId));
   return {
+    ...data,
     assignments,
     shortages: shortagesOf(slots, assignments),
     violations: data.violations.filter((v) => !(v.userId === userId && v.slotId === slotId)),

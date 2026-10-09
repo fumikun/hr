@@ -174,3 +174,16 @@ export const assignmentRuns = pgTable('assignment_runs', {
   result: jsonb('result'),
   error: text('error'),
 });
+
+// 部門・持ち場ごとの個別の受付期間と調整対象日。null の項目は上の設定を引き継ぐ。
+export const scopeSettings = pgTable(
+  'scope_settings',
+  {
+    scopeType: text('scope_type').notNull(), // department | post
+    scopeId: integer('scope_id').notNull(),
+    opensAt: timestamp('opens_at', { withTimezone: true }),
+    closesAt: timestamp('closes_at', { withTimezone: true }),
+    days: text('days').array(),
+  },
+  (t) => [primaryKey({ columns: [t.scopeType, t.scopeId] })],
+);

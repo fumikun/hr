@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { assignRoutes } from '../assign/routes.js';
 import type { AssignRunner } from '../assign/runner.js';
+import { scopeAdminRoutes } from '../scope/routes.js';
 import { availabilityAdminRoutes } from '../availability/routes.js';
 import { parseUserCsv } from './csv.js';
 import { findOverlaps, generateSlots, isFiveMinute } from './slots.js';
@@ -110,6 +111,7 @@ export function adminRoutes(
     new Hono()
       .route('/', availabilityAdminRoutes(store, actorId))
       .route('/', assignRoutes(store, runner, actorId))
+      .route('/', scopeAdminRoutes(store, actorId))
       .get('/departments', async (c) => c.json(await store.listDepartments()))
       .post('/departments', zValidator('json', departmentBody), async (c) => {
         const created = await store.createDepartment(c.req.valid('json').name, actorId(c));

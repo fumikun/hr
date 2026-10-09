@@ -392,7 +392,7 @@ export function AdminAssign() {
   const {
     departments,
     posts,
-    slots,
+    slots: allSlots,
     users,
     assign: loaded,
     run,
@@ -400,6 +400,11 @@ export function AdminAssign() {
   // 割り当ては操作のたびに画面全体を取り直さず、この画面の中で更新する（操作が即座に反映される）
   const [assign, setAssign] = useState(loaded);
   useEffect(() => setAssign(loaded), [loaded]);
+  // 調整の対象日でない枠は、この画面には出さない
+  const slots = useMemo(
+    () => allSlots.filter((s) => !assign.excludedSlotIds.includes(s.id)),
+    [allSlots, assign.excludedSlotIds],
+  );
   const reconcile = () =>
     void assignApi
       .data()

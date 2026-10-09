@@ -1,3 +1,5 @@
+import { isSlotTargeted, jstDay, type ScopeContext } from '../scope/resolve.js';
+import type { ScopeSetting } from '../scope/types.js';
 import type { AssignmentRow, Pair, Run, RunSummary } from '../assign/types.js';
 import type { AvailabilityEntry, InputStatus, Period } from '../availability/types.js';
 import type { AdminStore, AdminUser, Department, Post, Slot } from './types.js';
@@ -16,6 +18,7 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   posts: Post[];
   avail: Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>;
   setPeriodDirect: (p: Period) => void;
+  scopeCount: () => number;
 } {
   const users = [...initial];
   let nextId = Math.max(0, ...users.map((u) => u.id)) + 1;
@@ -24,6 +27,13 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   const assignments: AssignmentRow[] = [];
   const runs: Run[] = [];
   let publishedAt: Date | null = null;
+  let eventDays: string[] | null = null;
+  const scopes: ScopeSetting[] = [];
+  const scopeCtx = (): ScopeContext => ({
+    global: period,
+    eventDays: eventDays ?? [...new Set(slots.map((s) => jstDay(s.startsAt)))].sort(),
+    scopes,
+  });
   const posts: Post[] = [];
   let nextPostId = 1;
   let period: Period = { opensAt: null, closesAt: null };
@@ -48,15 +58,18 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
           restricted: p.restricted,
           memberIds: p.memberIds,
         })),
-        slots: slots.map((s) => ({
-          id: s.id,
-          departmentId: s.departmentId,
-          postId: s.postId,
-          start: s.startsAt.getTime(),
-          end: s.endsAt.getTime(),
-          minPeople: s.minPeople,
-          maxPeople: s.maxPeople,
-        })),
+        // 調整の対象日でない枠は割り当ての対象にしない
+        slots: slots
+          .filter((s) => isSlotTargeted(scopeCtx(), s))
+          .map((s) => ({
+            id: s.id,
+            departmentId: s.departmentId,
+            postId: s.postId,
+            start: s.startsAt.getTime(),
+            end: s.endsAt.getTime(),
+            minPeople: s.minPeople,
+            maxPeople: s.maxPeople,
+          })),
         availabilities: [...avail.entries()].flatMap(([userId, a]) =>
           a.entries.map((e) => ({
             userId,
@@ -120,6 +133,19 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
     latestRun: () => Promise.resolve(runs.length ? { ...runs[runs.length - 1]! } : null),
     failStaleRuns: () => Promise.resolve(),
     listAudit: () => Promise.resolve([]),
+    scopeCount: () => scopes.length,
+    getEventDays: () => Promise.resolve(eventDays),
+    setEventDays: (days: string[]) => {
+      eventDays = days;
+      return Promise.resolve();
+    },
+    listScopes: () => Promise.resolve([...scopes]),
+    setScope: (setting: ScopeSetting) => {
+      const i = scopes.findIndex((s) => s.type === setting.type && s.id === setting.id);
+      if (i >= 0) scopes.splice(i, 1);
+      if (setting.opensAt || setting.closesAt || setting.days) scopes.push(setting);
+      return Promise.resolve();
+    },
     getPublishedAt: () => Promise.resolve(publishedAt),
     setStatusAll: (status: 'draft' | 'confirmed') => {
       if (status === 'confirmed') publishedAt = new Date();

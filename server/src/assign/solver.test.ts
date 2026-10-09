@@ -122,7 +122,19 @@ describe('solve: locked assignments', () => {
 });
 
 describe('solve: soft constraints', () => {
-  it('moves people toward their target hours', async () => {
+  it('stops at everyone’s target hours when nothing else needs filling', async () => {
+    // どの枠も最低人数は 0。目標(2時間)に達したら、それ以上は入れない
+    const input = base({
+      users: [user(1, { targetMinutes: 120 }), user(2, { targetMinutes: 120 })],
+      slots: [1, 2, 3, 4, 5, 6].map((i) => slot(i, 8 + i, 9 + i, { minPeople: 0, maxPeople: 1 })),
+    });
+    const r = await solve(input);
+    const hours = (id: number) => r.assignments.filter((a) => a.userId === id).length;
+    expect([hours(1), hours(2)]).toEqual([2, 2]);
+  });
+
+  it('prefers even hours within a department over each person’s own target', async () => {
+    // 目標が 2 時間と 1 時間でも、同じ部門なら基本は同じ時間数にそろえる
     const input = base({
       users: [user(1, { targetMinutes: 120 }), user(2, { targetMinutes: 60 })],
       slots: [
@@ -133,8 +145,7 @@ describe('solve: soft constraints', () => {
     });
     const r = await solve(input);
     const hours = (id: number) => r.assignments.filter((a) => a.userId === id).length;
-    expect(hours(1)).toBe(2);
-    expect(hours(2)).toBe(1);
+    expect(hours(1)).toBe(hours(2));
   });
 
   it('avoids exceeding a max when others can cover', async () => {
@@ -164,6 +175,54 @@ describe('solve: soft constraints', () => {
     });
     const r = await solve(input);
     expect(new Set(r.assignments.map((a) => a.userId)).size).toBe(2);
+  });
+});
+
+describe('solve: balance within each department', () => {
+  it('evens out hours per department without evening out a multi-department person across them', async () => {
+    // X は 2 部門を掛け持ち。各部門 4 枠（1時間・定員1）を、その部門の 2 人で分ける。
+    // 部門ごとにそろえるので X は各部門で 2 時間ずつ（合計 4 時間）。
+    // もし部門をまたいで合計をそろえると、X を減らして Y・Z に偏らせてしまう。
+    const dept = (departmentId: number, postId: number, firstSlot: number, startHour: number) =>
+      [0, 1, 2, 3].map((i) =>
+        slot(firstSlot + i, startHour + i, startHour + i + 1, {
+          departmentId,
+          postId,
+          minPeople: 1,
+          maxPeople: 1,
+        }),
+      );
+    const input = base({
+      users: [
+        user(1, { departmentIds: [1, 2] }),
+        user(2, { departmentIds: [1] }),
+        user(3, { departmentIds: [2] }),
+      ],
+      posts: [
+        { id: 1, departmentId: 1, restricted: false, memberIds: [] },
+        { id: 2, departmentId: 2, restricted: false, memberIds: [] },
+      ],
+      slots: [...dept(1, 1, 1, 9), ...dept(2, 2, 5, 9)],
+    });
+    const r = await solve(input);
+    const hoursIn = (userId: number, departmentId: number) =>
+      r.assignments.filter(
+        (a) =>
+          a.userId === userId &&
+          input.slots.find((s) => s.id === a.slotId)!.departmentId === departmentId,
+      ).length;
+    expect([hoursIn(1, 1), hoursIn(2, 1)]).toEqual([2, 2]);
+    expect([hoursIn(1, 2), hoursIn(3, 2)]).toEqual([2, 2]);
+  });
+
+  it('keeps each department even on its own', async () => {
+    const input = base({
+      users: [user(1), user(2), user(3)],
+      slots: [1, 2, 3, 4, 5, 6].map((i) => slot(i, 8 + i, 9 + i, { minPeople: 1, maxPeople: 1 })),
+    });
+    const r = await solve(input);
+    const counts = [1, 2, 3].map((u) => r.assignments.filter((a) => a.userId === u).length);
+    expect(counts).toEqual([2, 2, 2]);
   });
 });
 

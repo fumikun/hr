@@ -55,6 +55,20 @@ describe('copyDay', () => {
     expect(out).toContainEqual(ent(2, 8, 9)); // 他の日は触らない
     expect(out).toContainEqual(ent(0, 9, 10)); // コピー元は残る
   });
+  it('leaves rows that can no longer be edited untouched', () => {
+    const locked: PaintEntry = { type: 'want', departmentId: 2, start: at(1, 9), end: at(1, 10) };
+    const src: PaintEntry = { type: 'want', departmentId: 2, start: at(0, 9), end: at(0, 10) };
+    const out = copyDay(
+      [src, locked, ent(0, 9, 10)],
+      '2026-11-01',
+      '2026-11-02',
+      (row) => row !== 2,
+    );
+    expect(out).toContainEqual(locked); // 部門2は受付終了。コピー先の入力はそのまま
+    expect(out.filter((e) => e.departmentId === 2)).toEqual([src, locked]);
+    expect(out).toContainEqual(ent(1, 9, 10)); // 「入れない」はコピーされる
+  });
+
   it('clears the target day when the source day is empty', () => {
     expect(copyDay([ent(1, 12, 13)], '2026-11-01', '2026-11-02')).toEqual([]);
   });

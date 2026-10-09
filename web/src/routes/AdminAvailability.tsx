@@ -2,7 +2,16 @@ import { Copy } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLoaderData, useRevalidator } from 'react-router';
 import { toast } from 'sonner';
-import { periodApi, type AdminUser, type Department, type InputStatus, type Period } from '../api';
+import {
+  periodApi,
+  type AdminUser,
+  type Department,
+  type InputStatus,
+  type Period,
+  type Post,
+  type ScopesData,
+} from '../api';
+import { ScopeSettings } from '@/components/ScopeSettings';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { ErrorAlert, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +44,8 @@ export type AdminAvailabilityData = {
   status: InputStatus[];
   users: AdminUser[];
   departments: Department[];
+  posts: Post[];
+  scopes: ScopesData;
 };
 
 // ISO → <input type="datetime-local"> の値（ローカル時刻）
@@ -62,7 +73,8 @@ const PHASE_LABEL: Record<Phase, string> = {
 };
 
 export function AdminAvailability() {
-  const { period, status, users, departments } = useLoaderData<AdminAvailabilityData>();
+  const { period, status, users, departments, posts, scopes } =
+    useLoaderData<AdminAvailabilityData>();
   const { revalidate } = useRevalidator();
   const confirm = useConfirm();
   const { run, pending, error } = useAction();
@@ -143,11 +155,11 @@ export function AdminAvailability() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            受付期間
+            全体の受付期間（既定）
             <Badge variant={phase === 'open' ? 'default' : 'secondary'}>{PHASE_LABEL[phase]}</Badge>
           </CardTitle>
           <CardDescription>
-            開始と締切の両方を設定すると受付が始まります。締切後、一般ユーザーは編集できません（管理者は常に編集可）。
+            開始と締切の両方を設定すると受付が始まります。部門・持ち場に個別の設定がなければ、この期間が使われます。締切後、一般ユーザーは編集できません（管理者は常に編集可）。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -214,6 +226,13 @@ export function AdminAvailability() {
           </p>
         </CardContent>
       </Card>
+
+      <ScopeSettings
+        data={scopes}
+        departments={departments}
+        posts={posts}
+        onChanged={() => void revalidate()}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">

@@ -1,13 +1,15 @@
 import { eq, inArray } from 'drizzle-orm';
 import { createDb } from './client.js';
-import { departments, postMembers, posts, userRoles, users } from './schema.js';
+import { departments, postMembers, posts, settings, userRoles, users } from './schema.js';
 
 const { db, sql } = createDb();
 const now = new Date();
 
 await db
   .insert(departments)
-  .values(['総務部', '模擬店部', 'デコレ部', '展示部', '放送部'].map((name) => ({ name })))
+  .values(
+    ['総務部', '企画部', '模擬店部', 'デコレ部', '展示部', '放送部'].map((name) => ({ name })),
+  )
   .onConflictDoNothing();
 const deptId = Object.fromEntries((await db.select().from(departments)).map((d) => [d.name, d.id]));
 
@@ -82,5 +84,10 @@ if (cooking)
     .insert(postMembers)
     .values({ postId: cooking.id, userId: userId['single@example.test']! })
     .onConflictDoNothing();
+// シフト調整の日程（日本時間）。管理者画面の「受付・対象日」で変更できる
+await db
+  .insert(settings)
+  .values({ key: 'event_days', value: ['2026-11-07', '2026-11-08'] })
+  .onConflictDoNothing();
 await sql.end();
 // TODO: サンプル枠・希望データ
