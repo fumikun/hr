@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
+import { solve } from './assign/solver.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import { isSignInAllowed, type AppUser } from './auth/signIn.js';
 import { createMemoryStore } from './admin/testStore.js';
@@ -33,6 +34,7 @@ const makeApp = (env: Record<string, string | undefined>) => {
   return createApp({
     env,
     adminStore: store,
+    solver: solve,
     findUser,
     listUsers: () => Promise.resolve(all),
     getOnboarding: (id) =>
@@ -330,6 +332,14 @@ describe('admin API', () => {
 
     it('lets a user save and re-save during the period, replacing entries', async () => {
       const { app, cookie } = await setup(general, true);
+      const slot = {
+        postId: 1,
+        minPeople: 1,
+        maxPeople: 1,
+        startsAt: new Date(),
+        endsAt: new Date(),
+      };
+      store.slots.push({ id: 1, departmentId: 1, ...slot }, { id: 2, departmentId: 2, ...slot });
       const put = (entries: unknown[]) =>
         app.request('/api/app/availability', json(cookie, 'PUT', { entries }));
       expect(
@@ -348,8 +358,13 @@ describe('admin API', () => {
       expect((await put([entry({ type: 'ok' })])).status).toBe(200);
       const got = (await (
         await app.request('/api/app/availability', { headers: { cookie } })
-      ).json()) as { submittedAt: string | null };
+      ).json()) as { submittedAt: string | null; slots: unknown[] };
       expect(got).toMatchObject({ open: true, entries: [{ type: 'ok' }] });
+      // 入力が必要な部門の名前と枠だけが返る
+      expect(got).toMatchObject({
+        departments: [{ id: 1 }],
+        slots: [{ departmentId: 1 }],
+      });
       expect(got.submittedAt).not.toBeNull();
     });
 
@@ -461,5 +476,114 @@ describe('admin API', () => {
       json(cookie, 'PUT', { name: '調理', restricted: false, memberIds: [] }),
     );
     expect(edit.status).toBe(200);
+  });
+
+  describe('auto assignment', () => {
+    const iso = (h: number) => new Date(Date.UTC(2026, 10, 1, h - 9)).toISOString();
+    const seed = () => {
+      const member = (id: number) => ({
+        ...newUser,
+        id,
+        email: `m${id}@example.test`,
+        roles: [{ departmentId: 1, requiresAvailability: true }],
+      });
+      store.users.push(member(10), member(11));
+      store.posts.push({ id: 1, departmentId: 1, name: '全体', restricted: false, memberIds: [] });
+      const slot = (id: number, a: number, b: number, min: number) => ({
+        id,
+        departmentId: 1,
+        postId: 1,
+        startsAt: new Date(iso(a)),
+        endsAt: new Date(iso(b)),
+        minPeople: min,
+        maxPeople: 2,
+      });
+      store.slots.push(slot(1, 9, 10, 1), slot(2, 10, 11, 3));
+    };
+    const finish = async (app: ReturnType<typeof makeApp>, cookie: string) => {
+      for (let i = 0; i < 100; i++) {
+        const run = (await (
+          await app.request('/api/admin/assign/run', { headers: { cookie } })
+        ).json()) as {
+          status: string;
+        };
+        if (run.status !== 'running') return run;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error('run did not finish');
+    };
+
+    it('is admin-only', async () => {
+      const app = makeApp(devEnv);
+      const cookie = await loginConfirmed(app, general.email);
+      expect((await app.request('/api/admin/assign/run', json(cookie, 'POST', {}))).status).toBe(
+        403,
+      );
+    });
+
+    it('runs asynchronously, reports shortages and keeps locked assignments on re-run', async () => {
+      const app = makeApp(devEnv);
+      const cookie = await loginConfirmed(app, admin.email);
+      seed();
+      const started = await app.request('/api/admin/assign/run', json(cookie, 'POST', {}));
+      expect(started.status).toBe(202);
+      // 実行中の再実行は拒否
+      expect((await app.request('/api/admin/assign/run', json(cookie, 'POST', {}))).status).toBe(
+        409,
+      );
+      expect(await finish(app, cookie)).toMatchObject({
+        status: 'done',
+        result: { shortageSlots: 1, shortagePeople: 1 },
+      });
+
+      const got = (await (
+        await app.request('/api/admin/assign', { headers: { cookie } })
+      ).json()) as {
+        assignments: { userId: number; slotId: number }[];
+        shortages: { slotId: number; missing: number }[];
+        violations: unknown[];
+      };
+      expect(got.shortages).toEqual([{ slotId: 2, missing: 1 }]);
+      expect(got.violations).toEqual([]);
+
+      // 手動追加（固定）は再実行で維持される。まず枠1の自動割り当てを外して手動で入れ直す
+      for (const a of got.assignments.filter((x) => x.slotId === 1))
+        await app.request(
+          `/api/admin/assign/assignments/${a.userId}/${a.slotId}`,
+          json(cookie, 'DELETE'),
+        );
+      await app.request(
+        '/api/admin/assign/assignments',
+        json(cookie, 'POST', { userId: 10, slotId: 1 }),
+      );
+      await app.request('/api/admin/assign/run', json(cookie, 'POST', {}));
+      await finish(app, cookie);
+      expect(store.assignments.find((a) => a.userId === 10 && a.slotId === 1)).toMatchObject({
+        source: 'manual',
+        locked: true,
+      });
+    });
+
+    it('warns on rule-breaking manual edits but still allows them', async () => {
+      const app = makeApp(devEnv);
+      const cookie = await loginConfirmed(app, admin.email);
+      seed();
+      const add = (userId: number, slotId: number) =>
+        app.request('/api/admin/assign/assignments', json(cookie, 'POST', { userId, slotId }));
+      // 他部門の人: 警告つきで追加できる
+      store.users.push({ ...newUser, id: 12, email: 'x@example.test', roles: [] });
+      const res = await add(12, 1);
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({ warnings: [{ reason: 'not_in_department' }] });
+      expect((await add(12, 1)).status).toBe(409);
+      expect((await add(999, 1)).status).toBe(400);
+
+      const lock = await app.request(
+        '/api/admin/assign/assignments/12/1/lock',
+        json(cookie, 'PUT', { locked: false }),
+      );
+      expect(lock.status).toBe(200);
+      expect(store.assignments[0]!.locked).toBe(false);
+    });
   });
 });

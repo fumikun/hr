@@ -9,9 +9,12 @@ import { departments, userRoles, users } from './db/schema.js';
 
 const { db } = createDb();
 
+const adminStore = createAdminStore(db);
+await adminStore.failStaleRuns();
+
 const app = createApp({
   env: process.env,
-  adminStore: createAdminStore(db),
+  adminStore,
   findUser: async (email) =>
     (await db.select().from(users).where(eq(users.email, email)).limit(1))[0] ?? null,
   listUsers: () => db.select().from(users),

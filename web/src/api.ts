@@ -152,3 +152,114 @@ export const slotApi = {
   update: (id: number, s: SlotEdit) => adminFetch<Slot>(`/slots/${id}`, 'PUT', s),
   remove: (id: number) => adminFetch<{ ok: true }>(`/slots/${id}`, 'DELETE'),
 };
+
+export type Period = { opensAt: string | null; closesAt: string | null };
+export type AvailabilityEntryDto = {
+  type: 'want' | 'ok' | 'ng';
+  departmentId: number | null;
+  startsAt: string;
+  endsAt: string;
+};
+export type AvailabilityData = {
+  period: Period;
+  open: boolean;
+  departments: Department[];
+  slots: { departmentId: number; startsAt: string; endsAt: string }[];
+  submittedAt: string | null;
+  entries: AvailabilityEntryDto[];
+};
+export type InputStatus = {
+  userId: number;
+  name: string;
+  email: string;
+  required: boolean;
+  submittedAt: string | null;
+  entryCount: number;
+};
+
+Object.assign(ERROR_TEXT, { period_closed: '受付期間外のため保存できません' });
+
+export const availabilityApi = {
+  get: async () => {
+    const res = await fetch('/api/app/availability');
+    if (!res.ok) throw new Error(`希望の取得に失敗しました (${res.status})`);
+    return (await res.json()) as AvailabilityData;
+  },
+  save: async (entries: AvailabilityEntryDto[]) => {
+    const res = await fetch('/api/app/availability', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+    if (res.ok) return;
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(ERROR_TEXT[data.error ?? ''] ?? `保存に失敗しました (${res.status})`);
+  },
+};
+
+export const periodApi = {
+  get: () => adminFetch<Period>('/settings/availability-period'),
+  put: (p: Period) => adminFetch<Period>('/settings/availability-period', 'PUT', p),
+  status: () => adminFetch<InputStatus[]>('/availability/status'),
+};
+
+export type RunStatus = 'running' | 'done' | 'failed';
+export type AssignRun = {
+  id: number;
+  status: RunStatus;
+  phase: string;
+  startedAt: string;
+  finishedAt: string | null;
+  result: {
+    assigned: number;
+    shortageSlots: number;
+    shortagePeople: number;
+    solverStatus: string;
+  } | null;
+  error: string | null;
+};
+export type AssignmentRow = {
+  userId: number;
+  slotId: number;
+  source: 'auto' | 'manual';
+  locked: boolean;
+  status: 'draft' | 'confirmed';
+};
+export type ViolationReason =
+  'not_in_department' | 'post_restricted' | 'unavailable' | 'double_booked' | 'over_capacity';
+export type Violation = { userId: number; slotId: number; reason: ViolationReason };
+export type AssignData = {
+  assignments: AssignmentRow[];
+  shortages: { slotId: number; missing: number }[];
+  violations: Violation[];
+};
+
+Object.assign(ERROR_TEXT, {
+  already_running: '自動割り当てが実行中です。完了までお待ちください',
+  exists: 'すでに割り当てられています',
+  confirmed: '確定済みの割り当ては削除できません',
+  unknown_user: 'ユーザーが存在しません',
+  unknown_slot: '枠が存在しません',
+});
+
+export const assignApi = {
+  data: () => adminFetch<AssignData>('/assign'),
+  latestRun: () => adminFetch<AssignRun | null>('/assign/run'),
+  run: (timeLimitSeconds: number) =>
+    adminFetch<AssignRun>('/assign/run', 'POST', { timeLimitSeconds }),
+  add: (userId: number, slotId: number) =>
+    adminFetch<{ warnings: Violation[] }>('/assign/assignments', 'POST', { userId, slotId }),
+  remove: (userId: number, slotId: number) =>
+    adminFetch<{ ok: true }>(`/assign/assignments/${userId}/${slotId}`, 'DELETE'),
+  setLocked: (userId: number, slotId: number, locked: boolean) =>
+    adminFetch<{ ok: true }>(`/assign/assignments/${userId}/${slotId}/lock`, 'PUT', { locked }),
+};
+
+export type Candidate = {
+  userId: number;
+  reasons: ViolationReason[];
+  wants: boolean;
+  assignedMinutes: number;
+};
+export const candidatesApi = (slotId: number) =>
+  adminFetch<Candidate[]>(`/assign/candidates/${slotId}`);

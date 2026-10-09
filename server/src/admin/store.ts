@@ -9,6 +9,7 @@ import {
   userRoles,
   users,
 } from '../db/schema.js';
+import { createAssignStore } from '../assign/store.js';
 import { createAvailabilityStore } from '../availability/store.js';
 import type { AdminStore, AdminUser, Post, PostInput, UserInput } from './types.js';
 
@@ -132,6 +133,7 @@ async function setMembers(tx: Tx, postId: number, input: PostInput) {
 export function createAdminStore(db: Db): AdminStore {
   return {
     ...createAvailabilityStore(db),
+    ...createAssignStore(db),
     listPosts: (departmentId) => loadPosts(db, departmentId),
 
     createPost: (departmentId, input, actorId) =>

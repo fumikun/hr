@@ -1,6 +1,8 @@
 import { zValidator } from '@hono/zod-validator';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
+import { assignRoutes } from '../assign/routes.js';
+import type { AssignRunner } from '../assign/runner.js';
 import { availabilityAdminRoutes } from '../availability/routes.js';
 import { parseUserCsv } from './csv.js';
 import { findOverlaps, generateSlots, isFiveMinute } from './slots.js';
@@ -82,10 +84,15 @@ async function membersBelong(store: AdminStore, departmentId: number, memberIds:
   );
 }
 
-export function adminRoutes(store: AdminStore, actorId: (c: Context) => number) {
+export function adminRoutes(
+  store: AdminStore,
+  runner: AssignRunner,
+  actorId: (c: Context) => number,
+) {
   return (
     new Hono()
       .route('/', availabilityAdminRoutes(store, actorId))
+      .route('/', assignRoutes(store, runner, actorId))
       .get('/departments', async (c) => c.json(await store.listDepartments()))
       .get('/posts', async (c) => {
         const dept = c.req.query('departmentId');

@@ -5,6 +5,8 @@ import { createAuthConfig } from './auth/index.js';
 import { isDevLoginEnabled } from './auth/devLogin.js';
 import type { AppUser, FindUser } from './auth/signIn.js';
 import { availabilityUserRoutes } from './availability/routes.js';
+import { createAssignRunner } from './assign/runner.js';
+import { solveInWorker, type Solver } from './assign/workerSolver.js';
 import { adminRoutes } from './admin/routes.js';
 import type { AdminStore } from './admin/types.js';
 
@@ -18,6 +20,8 @@ export type AppDeps = {
   getOnboarding: (userId: number) => Promise<Onboarding>;
   confirmOnboarding: (userId: number) => Promise<void>;
   adminStore: AdminStore;
+  /** 自動割り当てのソルバー。省略時は別スレッドの HiGHS */
+  solver?: Solver;
 };
 
 export function createApp({
@@ -27,8 +31,10 @@ export function createApp({
   getOnboarding,
   confirmOnboarding,
   adminStore,
+  solver = solveInWorker,
 }: AppDeps) {
   const app = new Hono();
+  const assignRunner = createAssignRunner(adminStore, solver);
   const authConfig = createAuthConfig(env, findUser);
 
   app.use(
@@ -81,7 +87,7 @@ export function createApp({
     await next();
   });
   app.use('/api/admin/*', verifyAuth(), requireConfirmed, requireAdmin);
-  app.route('/api/admin', adminRoutes(adminStore, sessionUserId));
+  app.route('/api/admin', adminRoutes(adminStore, assignRunner, sessionUserId));
 
   return app;
 }

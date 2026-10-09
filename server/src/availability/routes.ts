@@ -2,7 +2,14 @@ import { zValidator } from '@hono/zod-validator';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { isPeriodOpen, validateEntries } from './rules.js';
+import type { Department, Slot } from '../admin/types.js';
 import type { AvailabilityEntry, AvailabilityStore } from './types.js';
+
+/** 画面に必要な部門名と枠（シフトがある時間帯の表示用） */
+export type AvailabilityContext = {
+  listDepartments(): Promise<Department[]>;
+  listSlots(): Promise<Slot[]>;
+};
 
 const entriesBody = z.object({
   entries: z
@@ -44,16 +51,31 @@ async function save(
 }
 
 /** 一般ユーザー: 自分の希望の閲覧・保存（受付期間内のみ保存可） */
-export function availabilityUserRoutes(store: AvailabilityStore, userId: (c: Context) => number) {
+export function availabilityUserRoutes(
+  store: AvailabilityStore & AvailabilityContext,
+  userId: (c: Context) => number,
+) {
   return new Hono()
     .get('/availability', async (c) => {
       const id = userId(c);
-      const [period, roles, mine] = await Promise.all([
+      const [period, roles, mine, departments, allSlots] = await Promise.all([
         store.getPeriod(),
         store.getUserRoles(id),
         store.getAvailability(id),
+        store.listDepartments(),
+        store.listSlots(),
       ]);
-      return c.json({ period, open: isPeriodOpen(period, new Date()), roles, ...mine });
+      // 希望入力が必要な部門だけを返す（入力不要の部門は画面に出さない）
+      const needed = (roles ?? []).filter((r) => r.requiresAvailability).map((r) => r.departmentId);
+      return c.json({
+        period,
+        open: isPeriodOpen(period, new Date()),
+        departments: departments.filter((d) => needed.includes(d.id)),
+        slots: allSlots
+          .filter((s) => needed.includes(s.departmentId))
+          .map((s) => ({ departmentId: s.departmentId, startsAt: s.startsAt, endsAt: s.endsAt })),
+        ...mine,
+      });
     })
     .put('/availability', zValidator('json', entriesBody), async (c) => {
       if (!isPeriodOpen(await store.getPeriod(), new Date()))

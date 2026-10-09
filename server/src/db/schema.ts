@@ -136,3 +136,16 @@ export const auditLogs = pgTable('audit_logs', {
 });
 
 export const usersRelations = relations(users, ({ many }) => ({ roles: many(userRoles) }));
+
+// 自動割り当ての実行履歴。非同期に実行し、進行状況と結果を画面に出す。
+export const assignmentRuns = pgTable('assignment_runs', {
+  id: serial('id').primaryKey(),
+  status: text('status').notNull(), // running | done | failed
+  phase: text('phase').notNull().default('queued'), // loading | solving | saving
+  startedBy: integer('started_by').references(() => users.id, { onDelete: 'set null' }),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  options: jsonb('options'),
+  result: jsonb('result'),
+  error: text('error'),
+});

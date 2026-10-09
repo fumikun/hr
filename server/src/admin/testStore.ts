@@ -1,3 +1,4 @@
+import type { AssignmentRow, Pair, Run, RunSummary } from '../assign/types.js';
 import type { AvailabilityEntry, InputStatus, Period } from '../availability/types.js';
 import type { AdminStore, AdminUser, Department, Post, Slot } from './types.js';
 
@@ -10,6 +11,8 @@ export const testDepartments: Department[] = [
 export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   users: AdminUser[];
   slots: Slot[];
+  assignments: AssignmentRow[];
+  runs: Run[];
   posts: Post[];
   avail: Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>;
   setPeriodDirect: (p: Period) => void;
@@ -17,6 +20,8 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   const users = [...initial];
   let nextId = Math.max(0, ...users.map((u) => u.id)) + 1;
   const slots: Slot[] = [];
+  const assignments: AssignmentRow[] = [];
+  const runs: Run[] = [];
   const posts: Post[] = [];
   let nextPostId = 1;
   let period: Period = { opensAt: null, closesAt: null };
@@ -25,6 +30,93 @@ export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   return {
     users,
     slots,
+    assignments,
+    runs,
+    loadSolveInput: () =>
+      Promise.resolve({
+        users: users.map((u) => ({
+          id: u.id,
+          targetMinutes: u.targetMinutes,
+          maxMinutes: u.maxMinutes,
+          departmentIds: u.roles.map((r) => r.departmentId),
+        })),
+        posts: posts.map((p) => ({
+          id: p.id,
+          departmentId: p.departmentId,
+          restricted: p.restricted,
+          memberIds: p.memberIds,
+        })),
+        slots: slots.map((s) => ({
+          id: s.id,
+          departmentId: s.departmentId,
+          postId: s.postId,
+          start: s.startsAt.getTime(),
+          end: s.endsAt.getTime(),
+          minPeople: s.minPeople,
+          maxPeople: s.maxPeople,
+        })),
+        availabilities: [...avail.entries()].flatMap(([userId, a]) =>
+          a.entries.map((e) => ({
+            userId,
+            type: e.type,
+            departmentId: e.departmentId,
+            start: e.startsAt.getTime(),
+            end: e.endsAt.getTime(),
+          })),
+        ),
+        locked: assignments
+          .filter((a) => a.locked || a.status === 'confirmed')
+          .map(({ userId, slotId }) => ({ userId, slotId })),
+      }),
+    listAssignments: () => Promise.resolve([...assignments]),
+    replaceAutoAssignments: (pairs: Pair[], _actor: number, _summary: RunSummary) => {
+      for (let i = assignments.length - 1; i >= 0; i--)
+        if (assignments[i]!.status === 'draft' && !assignments[i]!.locked) assignments.splice(i, 1);
+      for (const p of pairs)
+        assignments.push({ ...p, source: 'auto', locked: false, status: 'draft' });
+      return Promise.resolve();
+    },
+    addManual: (pair: Pair) => {
+      if (assignments.some((a) => a.userId === pair.userId && a.slotId === pair.slotId))
+        return Promise.resolve('exists' as const);
+      assignments.push({ ...pair, source: 'manual', locked: true, status: 'draft' });
+      return Promise.resolve('ok' as const);
+    },
+    removeAssignment: (pair: Pair) => {
+      const i = assignments.findIndex((a) => a.userId === pair.userId && a.slotId === pair.slotId);
+      if (i < 0) return Promise.resolve('not_found' as const);
+      if (assignments[i]!.status === 'confirmed') return Promise.resolve('confirmed' as const);
+      assignments.splice(i, 1);
+      return Promise.resolve('ok' as const);
+    },
+    setLocked: (pair: Pair, locked: boolean) => {
+      const a = assignments.find((x) => x.userId === pair.userId && x.slotId === pair.slotId);
+      if (a) a.locked = locked;
+      return Promise.resolve(!!a);
+    },
+    createRun: () => {
+      if (runs.some((r) => r.status === 'running')) return Promise.resolve(null);
+      const run: Run = {
+        id: runs.length + 1,
+        status: 'running',
+        phase: 'queued',
+        startedAt: new Date(),
+        finishedAt: null,
+        result: null,
+        error: null,
+      };
+      runs.push(run);
+      return Promise.resolve({ ...run });
+    },
+    updateRun: (id: number, patch: Partial<Run>) => {
+      Object.assign(
+        runs.find((r) => r.id === id)!,
+        patch,
+      );
+      return Promise.resolve();
+    },
+    latestRun: () => Promise.resolve(runs.length ? { ...runs[runs.length - 1]! } : null),
+    failStaleRuns: () => Promise.resolve(),
     posts,
     listPosts: (dept) =>
       Promise.resolve(posts.filter((p) => dept === undefined || p.departmentId === dept)),

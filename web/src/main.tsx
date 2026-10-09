@@ -1,9 +1,21 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, redirect, RouterProvider } from 'react-router';
-import { adminApi, fetchMe, fetchOnboarding, postApi, slotApi } from './api';
+import {
+  adminApi,
+  assignApi,
+  availabilityApi,
+  fetchMe,
+  fetchOnboarding,
+  periodApi,
+  postApi,
+  slotApi,
+} from './api';
 import './styles.css';
 import { Toaster } from '@/components/ui/sonner';
+import { AdminAssign } from './routes/AdminAssign';
+import { AdminAvailability } from './routes/AdminAvailability';
+import { Availability } from './routes/Availability';
 import { AdminSlots } from './routes/AdminSlots';
 import { AdminUsers } from './routes/AdminUsers';
 import { Home } from './routes/Home';
@@ -26,6 +38,40 @@ async function requireAdmin() {
 }
 
 const router = createBrowserRouter([
+  {
+    path: '/admin/assign',
+    element: <AdminAssign />,
+    loader: async () => {
+      await requireAdmin();
+      const [departments, posts, slots, users, assign, run] = await Promise.all([
+        adminApi.departments(),
+        postApi.list(),
+        slotApi.list(),
+        adminApi.users(),
+        assignApi.data(),
+        assignApi.latestRun(),
+      ]);
+      return { departments, posts, slots, users, assign, run };
+    },
+  },
+  {
+    path: '/availability',
+    element: <Availability />,
+    loader: async () => {
+      await requireUser();
+      if (!(await fetchOnboarding()).confirmed) throw redirect('/onboarding');
+      return availabilityApi.get();
+    },
+  },
+  {
+    path: '/admin/availability',
+    element: <AdminAvailability />,
+    loader: async () => {
+      await requireAdmin();
+      const [period, status] = await Promise.all([periodApi.get(), periodApi.status()]);
+      return { period, status };
+    },
+  },
   {
     path: '/admin/slots',
     element: <AdminSlots />,

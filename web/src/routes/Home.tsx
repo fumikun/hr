@@ -13,10 +13,19 @@ export function Home() {
           <CardTitle>ようこそ、{me.name}さん</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Button asChild>
+            <Link to="/availability">シフト希望を入力する</Link>
+          </Button>
           {me.isAdmin && (
             <nav className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
                 <Link to="/admin/users">ユーザー管理</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/admin/availability">希望入力の受付・状況</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/admin/assign">自動割り当て・手動修正</Link>
               </Button>
               <Button asChild variant="outline">
                 <Link to="/admin/slots">部門・シフト枠設定</Link>
@@ -24,7 +33,7 @@ export function Home() {
             </nav>
           )}
           <p className="text-muted-foreground text-sm">
-            希望入力・シフト確認の画面はこれから実装します。
+            自分のシフト確認の画面はこれから実装します。
           </p>
         </CardContent>
       </Card>
