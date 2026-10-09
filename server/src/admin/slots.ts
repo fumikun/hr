@@ -4,6 +4,7 @@ const STEP_MS = 5 * 60_000;
 
 export type GenerateParams = {
   departmentId: number;
+  postId: number;
   /** 稼働する日付・時間帯（日ごとに1件以上） */
   windows: { startsAt: Date; endsAt: Date }[];
   slotMinutes: number;
@@ -23,6 +24,7 @@ export function generateSlots(p: GenerateParams): SlotInput[] {
     for (let t = w.startsAt.getTime(); t + len <= w.endsAt.getTime(); t += len) {
       out.push({
         departmentId: p.departmentId,
+        postId: p.postId,
         startsAt: new Date(t),
         endsAt: new Date(t + len),
         minPeople: p.minPeople,
@@ -33,10 +35,10 @@ export function generateSlots(p: GenerateParams): SlotInput[] {
   return out;
 }
 
-/** 同一部門内で時間が重なる枠の組を返す（隣接は重なりではない） */
-export function findOverlaps(slots: { departmentId: number; startsAt: Date; endsAt: Date }[]) {
+/** 同一持ち場内で時間が重なる枠の組を返す（隣接や別の持ち場は重なりではない） */
+export function findOverlaps(slots: { postId: number; startsAt: Date; endsAt: Date }[]) {
   const byDept = new Map<number, typeof slots>();
-  for (const s of slots) byDept.set(s.departmentId, [...(byDept.get(s.departmentId) ?? []), s]);
+  for (const s of slots) byDept.set(s.postId, [...(byDept.get(s.postId) ?? []), s]);
   const overlaps: [number, number][] = [];
   for (const list of byDept.values()) {
     const sorted = list

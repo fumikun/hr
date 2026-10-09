@@ -15,6 +15,13 @@
       "when": 1791543547338,
       "tag": "0001_amazing_whizzer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791544081444,
+      "tag": "0002_aromatic_pride",
+      "breakpoints": true
     }
   ]
 }

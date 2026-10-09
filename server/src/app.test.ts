@@ -239,8 +239,13 @@ describe('admin API', () => {
   it('generates, edits and deletes slots with validation', async () => {
     const app = makeApp(devEnv);
     const cookie = await loginConfirmed(app, admin.email);
+    const mk = await app.request(
+      '/api/admin/departments/1/posts',
+      json(cookie, 'POST', { name: '全体', restricted: false, memberIds: [] }),
+    );
+    const postId = ((await mk.json()) as { id: number }).id;
     const gen = {
-      departmentId: 1,
+      postId,
       windows: [{ startsAt: '2026-11-01T09:00:00+09:00', endsAt: '2026-11-01T12:00:00+09:00' }],
       slotMinutes: 90,
       minPeople: 1,
@@ -262,7 +267,7 @@ describe('admin API', () => {
     expect(bad.status).toBe(400);
     const unknown = await app.request(
       '/api/admin/slots/generate',
-      json(cookie, 'POST', { ...gen, departmentId: 99 }),
+      json(cookie, 'POST', { ...gen, postId: 99 }),
     );
     expect(unknown.status).toBe(400);
 
@@ -396,5 +401,65 @@ describe('admin API', () => {
       });
       expect(missing.status).toBe(404);
     });
+  });
+
+  it('manages posts: open and restricted, with member validation', async () => {
+    const app = makeApp(devEnv);
+    const cookie = await loginConfirmed(app, admin.email);
+    store.users.push(
+      {
+        ...newUser,
+        id: 10,
+        email: 'm@example.test',
+        roles: [{ departmentId: 1, requiresAvailability: true }],
+      },
+      {
+        ...newUser,
+        id: 11,
+        email: 'o@example.test',
+        roles: [{ departmentId: 2, requiresAvailability: true }],
+      },
+    );
+    const post = (body: unknown) =>
+      app.request('/api/admin/departments/1/posts', json(cookie, 'POST', body));
+
+    const open = await post({ name: '受付', restricted: false, memberIds: [] });
+    expect(open.status).toBe(201);
+    expect((await post({ name: '受付', restricted: false, memberIds: [] })).status).toBe(409);
+    // 制限付きなのにメンバーなし、他部門の人をメンバーにする、はどちらも拒否
+    expect((await post({ name: '調理', restricted: true, memberIds: [] })).status).toBe(400);
+    expect((await post({ name: '調理', restricted: true, memberIds: [11] })).status).toBe(400);
+    const restricted = await post({ name: '調理', restricted: true, memberIds: [10, 10] });
+    expect(restricted.status).toBe(201);
+    const created = (await restricted.json()) as { id: number; memberIds: number[] };
+    expect(created.memberIds).toEqual([10]);
+
+    // 同じ時間帯でも持ち場が違えば枠は重ならない。同じ持ち場なら重なる
+    const slot = (postId: number) =>
+      app.request(
+        '/api/admin/slots',
+        json(cookie, 'POST', {
+          postId,
+          startsAt: '2026-11-01T09:00:00+09:00',
+          endsAt: '2026-11-01T10:00:00+09:00',
+          minPeople: 1,
+          maxPeople: 2,
+        }),
+      );
+    const openId = ((await open.json()) as { id: number }).id;
+    expect((await slot(openId)).status).toBe(201);
+    expect((await slot(created.id)).status).toBe(201);
+    expect((await slot(created.id)).status).toBe(409);
+    expect(store.slots.every((s) => s.departmentId === 1)).toBe(true);
+
+    // 枠のある持ち場は削除できない
+    expect(
+      (await app.request(`/api/admin/posts/${created.id}`, json(cookie, 'DELETE'))).status,
+    ).toBe(409);
+    const edit = await app.request(
+      `/api/admin/posts/${created.id}`,
+      json(cookie, 'PUT', { name: '調理', restricted: false, memberIds: [] }),
+    );
+    expect(edit.status).toBe(200);
   });
 });

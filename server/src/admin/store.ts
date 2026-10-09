@@ -1,8 +1,16 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { createDb } from '../db/client.js';
-import { auditLogs, departments, shiftSlots, userRoles, users } from '../db/schema.js';
+import {
+  auditLogs,
+  departments,
+  postMembers,
+  posts,
+  shiftSlots,
+  userRoles,
+  users,
+} from '../db/schema.js';
 import { createAvailabilityStore } from '../availability/store.js';
-import type { AdminStore, AdminUser, UserInput } from './types.js';
+import type { AdminStore, AdminUser, Post, PostInput, UserInput } from './types.js';
 
 type Db = ReturnType<typeof createDb>['db'];
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -50,6 +58,21 @@ async function setRoles(tx: Tx, userId: number, roles: UserInput['roles']) {
     await tx
       .delete(userRoles)
       .where(and(eq(userRoles.userId, userId), inArray(userRoles.departmentId, removed)));
+    // 部門を外れた人は、その部門の持ち場のメンバーからも外す
+    const stale = await tx
+      .select({ id: posts.id })
+      .from(posts)
+      .where(inArray(posts.departmentId, removed));
+    if (stale.length > 0)
+      await tx.delete(postMembers).where(
+        and(
+          eq(postMembers.userId, userId),
+          inArray(
+            postMembers.postId,
+            stale.map((p) => p.id),
+          ),
+        ),
+      );
   }
   for (const r of roles) {
     if (existing.has(r.departmentId)) {
@@ -74,9 +97,96 @@ async function audit(
   await tx.insert(auditLogs).values({ actorId, action, target, before, after });
 }
 
+async function loadPosts(db: Db | Tx, departmentId?: number): Promise<Post[]> {
+  const rows = await db
+    .select()
+    .from(posts)
+    .where(departmentId === undefined ? undefined : eq(posts.departmentId, departmentId))
+    .orderBy(posts.departmentId, posts.id);
+  if (rows.length === 0) return [];
+  const members = await db
+    .select()
+    .from(postMembers)
+    .where(
+      inArray(
+        postMembers.postId,
+        rows.map((r) => r.id),
+      ),
+    );
+  return rows.map((r) => ({
+    ...r,
+    memberIds: members
+      .filter((m) => m.postId === r.id)
+      .map((m) => m.userId)
+      .sort((a, b) => a - b),
+  }));
+}
+
+async function setMembers(tx: Tx, postId: number, input: PostInput) {
+  await tx.delete(postMembers).where(eq(postMembers.postId, postId));
+  // 制限なしの持ち場にはメンバー名簿を持たない
+  if (input.restricted && input.memberIds.length > 0)
+    await tx.insert(postMembers).values(input.memberIds.map((userId) => ({ postId, userId })));
+}
+
 export function createAdminStore(db: Db): AdminStore {
   return {
     ...createAvailabilityStore(db),
+    listPosts: (departmentId) => loadPosts(db, departmentId),
+
+    createPost: (departmentId, input, actorId) =>
+      db.transaction(async (tx) => {
+        const [dup] = await tx
+          .select()
+          .from(posts)
+          .where(and(eq(posts.departmentId, departmentId), eq(posts.name, input.name)));
+        if (dup) return null;
+        const [row] = await tx
+          .insert(posts)
+          .values({ departmentId, name: input.name, restricted: input.restricted })
+          .returning();
+        await setMembers(tx, row!.id, input);
+        const [created] = (await loadPosts(tx, departmentId)).filter((p) => p.id === row!.id);
+        await audit(tx, actorId, 'post.create', `post:${row!.id}`, null, created);
+        return created!;
+      }),
+
+    updatePost: (id, input, actorId) =>
+      db.transaction(async (tx) => {
+        const [row] = await tx.select().from(posts).where(eq(posts.id, id));
+        if (!row) return null;
+        const before = (await loadPosts(tx, row.departmentId)).find((p) => p.id === id);
+        const [dup] = await tx
+          .select()
+          .from(posts)
+          .where(and(eq(posts.departmentId, row.departmentId), eq(posts.name, input.name)));
+        if (dup && dup.id !== id) return 'name_taken';
+        await tx
+          .update(posts)
+          .set({ name: input.name, restricted: input.restricted })
+          .where(eq(posts.id, id));
+        await setMembers(tx, id, input);
+        const after = (await loadPosts(tx, row.departmentId)).find((p) => p.id === id);
+        await audit(tx, actorId, 'post.update', `post:${id}`, before, after);
+        return after!;
+      }),
+
+    deletePost: (id, actorId) =>
+      db.transaction(async (tx) => {
+        const [row] = await tx.select().from(posts).where(eq(posts.id, id));
+        if (!row) return 'not_found';
+        const [used] = await tx
+          .select({ id: shiftSlots.id })
+          .from(shiftSlots)
+          .where(eq(shiftSlots.postId, id))
+          .limit(1);
+        if (used) return 'has_slots';
+        const before = (await loadPosts(tx, row.departmentId)).find((p) => p.id === id);
+        await tx.delete(posts).where(eq(posts.id, id));
+        await audit(tx, actorId, 'post.delete', `post:${id}`, before, null);
+        return 'ok';
+      }),
+
     listSlots: (departmentId) =>
       db
         .select()

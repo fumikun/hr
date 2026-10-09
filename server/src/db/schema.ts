@@ -9,6 +9,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const availabilityType = pgEnum('availability_type', ['want', 'ok', 'ng']);
@@ -47,12 +48,44 @@ export const userRoles = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.departmentId] })],
 );
 
+// 持ち場: 部門内の担当場所。restricted=false なら部門の全員が入れる。
+// restricted=true なら post_members に登録された人だけ（部門の所属者に限る）。
+export const posts = pgTable(
+  'posts',
+  {
+    id: serial('id').primaryKey(),
+    departmentId: integer('department_id')
+      .notNull()
+      .references(() => departments.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    restricted: boolean('restricted').notNull().default(false),
+  },
+  (t) => [unique().on(t.departmentId, t.name)],
+);
+
+export const postMembers = pgTable(
+  'post_members',
+  {
+    postId: integer('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.postId, t.userId] })],
+);
+
 // 枠は部門ごと・5分単位。部門内で長さが混在してよいので、個々の枠を実体として持つ。
 export const shiftSlots = pgTable('shift_slots', {
   id: serial('id').primaryKey(),
   departmentId: integer('department_id')
     .notNull()
     .references(() => departments.id, { onDelete: 'cascade' }),
+  // 持ち場。department_id は post の部門と常に一致させる（API側で保証）
+  postId: integer('post_id')
+    .notNull()
+    .references(() => posts.id, { onDelete: 'restrict' }),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
   minPeople: integer('min_people').notNull().default(1),

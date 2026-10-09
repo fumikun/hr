@@ -12,7 +12,7 @@ export type UserInput = {
 };
 export type AdminUser = UserInput & { id: number };
 
-export interface AdminStore extends SlotStore, AvailabilityStore {
+export interface AdminStore extends SlotStore, PostStore, AvailabilityStore {
   listUsers(): Promise<AdminUser[]>;
   listDepartments(): Promise<Department[]>;
   /** メールが既に登録済みなら null */
@@ -23,8 +23,27 @@ export interface AdminStore extends SlotStore, AvailabilityStore {
   importUsers(inputs: UserInput[], actorId: number): Promise<{ created: number; updated: number }>;
 }
 
+export type PostInput = {
+  name: string;
+  /** true なら memberIds の人だけ入れる。false なら部門の全員 */
+  restricted: boolean;
+  memberIds: number[];
+};
+export type Post = PostInput & { id: number; departmentId: number };
+
+export interface PostStore {
+  listPosts(departmentId?: number): Promise<Post[]>;
+  /** 同じ部門に同名の持ち場があれば null */
+  createPost(departmentId: number, input: PostInput, actorId: number): Promise<Post | null>;
+  /** 同名の持ち場が他にあれば 'name_taken' */
+  updatePost(id: number, input: PostInput, actorId: number): Promise<Post | 'name_taken' | null>;
+  /** 枠がある持ち場は削除できない */
+  deletePost(id: number, actorId: number): Promise<'ok' | 'not_found' | 'has_slots'>;
+}
+
 export type SlotInput = {
   departmentId: number;
+  postId: number;
   startsAt: Date;
   endsAt: Date;
   minPeople: number;
@@ -35,10 +54,10 @@ export type Slot = SlotInput & { id: number };
 export interface SlotStore {
   listSlots(departmentId?: number): Promise<Slot[]>;
   createSlots(inputs: SlotInput[], actorId: number): Promise<Slot[]>;
-  /** 部門は変更できない */
+  /** 部門・持ち場は変更できない */
   updateSlot(
     id: number,
-    input: Omit<SlotInput, 'departmentId'>,
+    input: Omit<SlotInput, 'departmentId' | 'postId'>,
     actorId: number,
   ): Promise<Slot | null>;
   deleteSlot(id: number, actorId: number): Promise<boolean>;

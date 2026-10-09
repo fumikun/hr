@@ -1,5 +1,5 @@
 import type { AvailabilityEntry, InputStatus, Period } from '../availability/types.js';
-import type { AdminStore, AdminUser, Department, Slot } from './types.js';
+import type { AdminStore, AdminUser, Department, Post, Slot } from './types.js';
 
 export const testDepartments: Department[] = [
   { id: 1, name: '総務部' },
@@ -10,18 +10,51 @@ export const testDepartments: Department[] = [
 export function createMemoryStore(initial: AdminUser[] = []): AdminStore & {
   users: AdminUser[];
   slots: Slot[];
+  posts: Post[];
   avail: Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>;
   setPeriodDirect: (p: Period) => void;
 } {
   const users = [...initial];
   let nextId = Math.max(0, ...users.map((u) => u.id)) + 1;
   const slots: Slot[] = [];
+  const posts: Post[] = [];
+  let nextPostId = 1;
   let period: Period = { opensAt: null, closesAt: null };
   const avail = new Map<number, { submittedAt: Date; entries: AvailabilityEntry[] }>();
   let nextSlotId = 1;
   return {
     users,
     slots,
+    posts,
+    listPosts: (dept) =>
+      Promise.resolve(posts.filter((p) => dept === undefined || p.departmentId === dept)),
+    createPost: (departmentId, input) => {
+      if (posts.some((p) => p.departmentId === departmentId && p.name === input.name))
+        return Promise.resolve(null);
+      const post = { ...input, id: nextPostId++, departmentId };
+      posts.push(post);
+      return Promise.resolve(post);
+    },
+    updatePost: (id, input) => {
+      const i = posts.findIndex((p) => p.id === id);
+      if (i < 0) return Promise.resolve(null);
+      const cur = posts[i]!;
+      if (
+        posts.some(
+          (p) => p.id !== id && p.departmentId === cur.departmentId && p.name === input.name,
+        )
+      )
+        return Promise.resolve('name_taken' as const);
+      posts[i] = { ...cur, ...input };
+      return Promise.resolve(posts[i]);
+    },
+    deletePost: (id) => {
+      const i = posts.findIndex((p) => p.id === id);
+      if (i < 0) return Promise.resolve('not_found' as const);
+      if (slots.some((s) => s.postId === id)) return Promise.resolve('has_slots' as const);
+      posts.splice(i, 1);
+      return Promise.resolve('ok' as const);
+    },
     avail,
     setPeriodDirect: (p: Period) => {
       period = p;

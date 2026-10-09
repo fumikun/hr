@@ -47,7 +47,7 @@ const slotBody = z
   .refine(minLeMax, { message: 'minPeople must be <= maxPeople', path: ['minPeople'] });
 const generateBody = z
   .object({
-    departmentId: z.number().int(),
+    postId: z.number().int(),
     windows: z
       .array(z.object({ startsAt: date5, endsAt: date5 }).refine((w) => w.endsAt > w.startsAt))
       .min(1)
@@ -62,11 +62,62 @@ const generateBody = z
   })
   .refine(minLeMax, { message: 'minPeople must be <= maxPeople', path: ['minPeople'] });
 
+const postBody = z
+  .object({
+    name: z.string().trim().min(1).max(50),
+    restricted: z.boolean(),
+    memberIds: z.array(z.number().int()).max(500),
+  })
+  .refine((p) => !p.restricted || p.memberIds.length > 0, {
+    message: 'restricted post needs at least one member',
+    path: ['memberIds'],
+  })
+  .transform((p) => ({ ...p, memberIds: [...new Set(p.memberIds)] }));
+
+/** 持ち場のメンバーは、その部門の所属者でなければならない */
+async function membersBelong(store: AdminStore, departmentId: number, memberIds: number[]) {
+  const users = await store.listUsers();
+  return memberIds.every((id) =>
+    users.some((u) => u.id === id && u.roles.some((r) => r.departmentId === departmentId)),
+  );
+}
+
 export function adminRoutes(store: AdminStore, actorId: (c: Context) => number) {
   return (
     new Hono()
       .route('/', availabilityAdminRoutes(store, actorId))
       .get('/departments', async (c) => c.json(await store.listDepartments()))
+      .get('/posts', async (c) => {
+        const dept = c.req.query('departmentId');
+        return c.json(await store.listPosts(dept ? Number(dept) : undefined));
+      })
+      .post('/departments/:id{[0-9]+}/posts', zValidator('json', postBody), async (c) => {
+        const departmentId = Number(c.req.param('id'));
+        if (!(await store.listDepartments()).some((d) => d.id === departmentId))
+          return c.json({ error: 'unknown_department' }, 400);
+        const input = c.req.valid('json');
+        if (!(await membersBelong(store, departmentId, input.memberIds)))
+          return c.json({ error: 'member_not_in_department' }, 400);
+        const created = await store.createPost(departmentId, input, actorId(c));
+        return created ? c.json(created, 201) : c.json({ error: 'name_taken' }, 409);
+      })
+      .put('/posts/:id{[0-9]+}', zValidator('json', postBody), async (c) => {
+        const id = Number(c.req.param('id'));
+        const post = (await store.listPosts()).find((p) => p.id === id);
+        if (!post) return c.json({ error: 'not_found' }, 404);
+        const input = c.req.valid('json');
+        if (!(await membersBelong(store, post.departmentId, input.memberIds)))
+          return c.json({ error: 'member_not_in_department' }, 400);
+        const updated = await store.updatePost(id, input, actorId(c));
+        if (updated === 'name_taken') return c.json({ error: 'name_taken' }, 409);
+        return updated ? c.json(updated) : c.json({ error: 'not_found' }, 404);
+      })
+      .delete('/posts/:id{[0-9]+}', async (c) => {
+        const result = await store.deletePost(Number(c.req.param('id')), actorId(c));
+        if (result === 'not_found') return c.json({ error: 'not_found' }, 404);
+        if (result === 'has_slots') return c.json({ error: 'has_slots' }, 409);
+        return c.json({ ok: true });
+      })
       .get('/slots', async (c) => {
         const dept = c.req.query('departmentId');
         return c.json(await store.listSlots(dept ? Number(dept) : undefined));
@@ -74,22 +125,23 @@ export function adminRoutes(store: AdminStore, actorId: (c: Context) => number) 
       // 設定から枠を自動生成する。既存枠と重なる場合は何も作らず 409
       .post('/slots/generate', zValidator('json', generateBody), async (c) => {
         const input = c.req.valid('json');
-        if (!(await store.listDepartments()).some((d) => d.id === input.departmentId))
-          return c.json({ error: 'unknown_department' }, 400);
-        const generated = generateSlots(input);
-        const existing = await store.listSlots(input.departmentId);
+        const post = (await store.listPosts()).find((p) => p.id === input.postId);
+        if (!post) return c.json({ error: 'unknown_post' }, 400);
+        const generated = generateSlots({ ...input, departmentId: post.departmentId });
+        const existing = await store.listSlots(post.departmentId);
         if (findOverlaps([...existing, ...generated]).length > 0)
           return c.json({ error: 'overlap' }, 409);
         return c.json(await store.createSlots(generated, actorId(c)), 201);
       })
       .post(
         '/slots',
-        zValidator('json', slotBody.and(z.object({ departmentId: z.number().int() }))),
+        zValidator('json', slotBody.and(z.object({ postId: z.number().int() }))),
         async (c) => {
-          const input = c.req.valid('json');
-          if (!(await store.listDepartments()).some((d) => d.id === input.departmentId))
-            return c.json({ error: 'unknown_department' }, 400);
-          const existing = await store.listSlots(input.departmentId);
+          const body = c.req.valid('json');
+          const post = (await store.listPosts()).find((p) => p.id === body.postId);
+          if (!post) return c.json({ error: 'unknown_post' }, 400);
+          const input = { ...body, departmentId: post.departmentId };
+          const existing = await store.listSlots(post.departmentId);
           if (findOverlaps([...existing, input]).length > 0)
             return c.json({ error: 'overlap' }, 409);
           const [created] = await store.createSlots([input], actorId(c));
@@ -102,7 +154,7 @@ export function adminRoutes(store: AdminStore, actorId: (c: Context) => number) 
         const current = (await store.listSlots()).find((s) => s.id === id);
         if (!current) return c.json({ error: 'not_found' }, 404);
         const others = (await store.listSlots(current.departmentId)).filter((s) => s.id !== id);
-        if (findOverlaps([...others, { ...input, departmentId: current.departmentId }]).length > 0)
+        if (findOverlaps([...others, { ...input, postId: current.postId }]).length > 0)
           return c.json({ error: 'overlap' }, 409);
         return c.json(await store.updateSlot(id, input, actorId(c)));
       })

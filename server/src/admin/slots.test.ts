@@ -4,7 +4,7 @@ import { findOverlaps, generateSlots } from './slots.js';
 const d = (s: string) => new Date(`2026-11-01T${s}:00+09:00`);
 
 describe('generateSlots', () => {
-  const base = { departmentId: 1, minPeople: 2, maxPeople: 4 };
+  const base = { departmentId: 1, postId: 1, minPeople: 2, maxPeople: 4 };
   it('tiles a window and drops the remainder', () => {
     const slots = generateSlots({
       ...base,
@@ -31,9 +31,9 @@ describe('generateSlots', () => {
 });
 
 describe('findOverlaps', () => {
-  it('ignores adjacency and other departments', () => {
-    const s = (departmentId: number, a: string, b: string) => ({
-      departmentId,
+  it('ignores adjacency and other posts', () => {
+    const s = (postId: number, a: string, b: string) => ({
+      postId,
       startsAt: d(a),
       endsAt: d(b),
     });

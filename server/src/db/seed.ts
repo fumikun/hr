@@ -1,6 +1,6 @@
 import { eq, inArray } from 'drizzle-orm';
 import { createDb } from './client.js';
-import { departments, userRoles, users } from './schema.js';
+import { departments, postMembers, posts, userRoles, users } from './schema.js';
 
 const { db, sql } = createDb();
 const now = new Date();
@@ -69,5 +69,18 @@ for (const a of accounts) {
       .onConflictDoNothing();
   }
 }
+// 持ち場: 各部門に「全体」（誰でも可）を用意し、模擬店部には一部の人だけの「調理」を追加する
+for (const id of Object.values(deptId))
+  await db.insert(posts).values({ departmentId: id, name: '全体' }).onConflictDoNothing();
+const [cooking] = await db
+  .insert(posts)
+  .values({ departmentId: deptId['模擬店部']!, name: '調理', restricted: true })
+  .onConflictDoNothing()
+  .returning();
+if (cooking)
+  await db
+    .insert(postMembers)
+    .values({ postId: cooking.id, userId: userId['single@example.test']! })
+    .onConflictDoNothing();
 await sql.end();
 // TODO: サンプル枠・希望データ
