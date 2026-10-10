@@ -42,7 +42,7 @@ const ADMIN_GROUPS: { title: string; items: Item[] }[] = [
       { to: '/admin/users', label: 'ユーザー', icon: Users },
       { to: '/admin/departments', label: '部門', icon: Building2 },
       { to: '/admin/posts', label: '持ち場', icon: MapPin },
-      { to: '/admin/slots', label: '枠', icon: LayoutGrid },
+      { to: '/admin/slots', label: 'シフト枠', icon: LayoutGrid },
     ],
   },
   {
@@ -76,7 +76,7 @@ function NavGroup({
               onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors lg:py-1.5',
                   isActive
                     ? 'bg-primary text-primary-foreground font-medium'
                     : 'text-foreground/80 hover:bg-accent hover:text-foreground',
@@ -95,11 +95,11 @@ function NavGroup({
 
 function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   return (
-    <div className="flex h-full flex-col gap-6 p-4">
+    <div className="flex h-full flex-col gap-6 p-4 lg:gap-4">
       <div className="px-3">
         <p className="font-bold">Kosensai HR</p>
       </div>
-      <nav aria-label="メインメニュー" className="flex-1 space-y-6 overflow-y-auto">
+      <nav aria-label="メインメニュー" className="flex-1 space-y-6 overflow-y-auto lg:space-y-3">
         <NavGroup title="メニュー" items={MEMBER} onNavigate={onNavigate} />
         {me.isAdmin && (
           <>

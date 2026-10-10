@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLoaderData } from 'react-router';
-import { auditApi, type AuditRow } from '../api';
+import {
+  auditApi,
+  type AdminUser,
+  type AuditRow,
+  type Department,
+  type Post,
+  type Slot,
+} from '../api';
 import { ACTION } from '../lib/auditLabels';
 import { diffRows } from '../lib/auditDiff';
+import { targetLabel } from '../lib/auditTarget';
 import { ErrorAlert, Page } from '@/components/Page';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,7 +31,13 @@ import {
 import { fmtDateTime } from '@/lib/datetime';
 import { useAction } from '@/lib/useAction';
 
-export type AdminAuditData = { rows: AuditRow[] };
+export type AdminAuditData = {
+  rows: AuditRow[];
+  users: AdminUser[];
+  departments: Department[];
+  posts: Post[];
+  slots: Slot[];
+};
 
 // 操作の種類（先頭一致で絞り込む）
 const KINDS: [string, string][] = [
@@ -61,7 +75,16 @@ function Changes({ row }: { row: AuditRow }) {
 }
 
 export function AdminAudit() {
-  const { rows: first } = useLoaderData<AdminAuditData>();
+  const { rows: first, users, departments, posts, slots } = useLoaderData<AdminAuditData>();
+  const names = useMemo(
+    () => ({
+      users: new Map(users.map((u) => [u.id, u.name])),
+      departments: new Map(departments.map((d) => [d.id, d.name])),
+      posts: new Map(posts.map((p) => [p.id, { name: p.name, departmentId: p.departmentId }])),
+      slots: new Map(slots.map((x) => [x.id, x])),
+    }),
+    [users, departments, posts, slots],
+  );
   const [rows, setRows] = useState(first);
   const [done, setDone] = useState(first.length < PAGE);
   const [kind, setKind] = useState('all');
@@ -110,43 +133,57 @@ export function AdminAudit() {
           ))}
         </SelectContent>
       </Select>
-      <div className="bg-card overflow-x-auto rounded-lg border">
-        <Table stack>
-          <TableHeader>
-            <TableRow>
-              <TableHead>日時</TableHead>
-              <TableHead>操作者</TableHead>
-              <TableHead>操作</TableHead>
-              <TableHead>対象</TableHead>
-              <TableHead>変更内容</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell data-label="日時" className="whitespace-nowrap">
-                  {fmtDateTime(r.createdAt)}
-                </TableCell>
-                <TableCell data-label="操作者">{r.actorName ?? '（削除済み）'}</TableCell>
-                <TableCell data-label="操作">{ACTION[r.action] ?? r.action}</TableCell>
-                <TableCell data-label="対象" className="text-muted-foreground">
-                  {r.target}
-                </TableCell>
-                <TableCell data-label="変更内容" className="max-w-md whitespace-normal">
-                  <Changes row={r} />
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
+      {rows.length === 0 && (
+        <p className="text-muted-foreground py-6 text-center text-sm">該当する履歴はありません</p>
+      )}
+      {/* スマホ: 1件を2行にまとめた一覧 */}
+      {rows.length > 0 && (
+        <ul className="bg-card divide-y rounded-lg border sm:hidden">
+          {rows.map((r) => (
+            <li key={r.id} className="space-y-0.5 px-3 py-2 text-sm">
+              <p className="text-muted-foreground flex justify-between gap-2 text-xs">
+                <span>{fmtDateTime(r.createdAt)}</span>
+                <span className="truncate">{r.actorName ?? '（削除済み）'}</span>
+              </p>
+              <p>
+                <span className="font-medium">{ACTION[r.action] ?? r.action}</span>
+                <span className="text-muted-foreground ml-2">{targetLabel(r.target, names)}</span>
+              </p>
+              <Changes row={r} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {rows.length > 0 && (
+        <div className="bg-card hidden overflow-x-auto rounded-lg border sm:block">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground text-center">
-                  該当する履歴はありません
-                </TableCell>
+                <TableHead>日時</TableHead>
+                <TableHead>操作者</TableHead>
+                <TableHead>操作</TableHead>
+                <TableHead>対象</TableHead>
+                <TableHead>変更内容</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="whitespace-nowrap">{fmtDateTime(r.createdAt)}</TableCell>
+                  <TableCell>{r.actorName ?? '（削除済み）'}</TableCell>
+                  <TableCell>{ACTION[r.action] ?? r.action}</TableCell>
+                  <TableCell className="text-muted-foreground whitespace-normal">
+                    {targetLabel(r.target, names)}
+                  </TableCell>
+                  <TableCell className="max-w-md whitespace-normal">
+                    <Changes row={r} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
       {error && <ErrorAlert>{error}</ErrorAlert>}
       {!done && (
         <Button variant="outline" disabled={pending} onClick={() => void more()}>

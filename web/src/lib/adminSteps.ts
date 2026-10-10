@@ -31,10 +31,10 @@ export function adminSteps(
       done: d.users.length > 1,
     },
     {
-      title: '部門の持ち場と枠を作る',
+      title: '持ち場とシフト枠を作る',
       detail: d.slots.length > 0 ? `${d.slots.length} 枠を作成済み` : 'まだ枠がありません',
       to: '/admin/slots',
-      link: '枠',
+      link: 'シフト枠',
       done: d.slots.length > 0,
     },
     {

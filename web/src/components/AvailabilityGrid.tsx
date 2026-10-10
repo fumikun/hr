@@ -91,7 +91,7 @@ export function AvailabilityGrid({
   );
 
   return (
-    <div className="space-y-1">
+    <div className="max-w-3xl space-y-1">
       {idle.length > 0 && (
         <p className="text-muted-foreground text-xs">
           {idle.map((r) => r.label).join('・')}は、この日のシフト枠がありません。
@@ -118,8 +118,7 @@ export function AvailabilityGrid({
               >
                 <span className="text-sm leading-tight font-medium">{c.label}</span>
                 <span className="text-muted-foreground text-xs leading-tight">{c.sub}</span>
-                {/* 「入れない」列は、上の「終日 ×」と同じなので出さない */}
-                {c.row !== null && !locked(c.row) && cells.length > 0 && (
+                {!locked(c.row) && cells.length > 0 && (
                   <button
                     type="button"
                     className="text-muted-foreground hover:bg-accent min-h-9 rounded border px-2.5 text-xs sm:min-h-0 sm:px-1.5"

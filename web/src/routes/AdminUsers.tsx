@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ListRow, MobileList } from '@/components/ListRow';
 import { Textarea } from '@/components/ui/textarea';
 import { useAction } from '@/lib/useAction';
 import { useQueryParam } from '@/lib/useQueryParam';
@@ -188,18 +189,7 @@ function UserForm({
         ))}
       </fieldset>
       {(localError || error) && <ErrorAlert>{localError || error}</ErrorAlert>}
-      <div className="flex justify-end gap-2">
-        {remove && (
-          <Button
-            type="button"
-            variant="destructive"
-            className="mr-auto"
-            disabled={pending}
-            onClick={() => void del()}
-          >
-            このユーザーを削除
-          </Button>
-        )}
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
         <Button type="button" variant="outline" onClick={onCancel}>
           キャンセル
         </Button>
@@ -207,6 +197,20 @@ function UserForm({
           {pending ? '保存中…' : '保存'}
         </Button>
       </div>
+      {/* 押し間違えないよう、削除は保存から離して置く */}
+      {remove && (
+        <div className="border-t pt-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="text-destructive w-full sm:w-fit"
+            disabled={pending}
+            onClick={() => void del()}
+          >
+            このユーザーを削除
+          </Button>
+        </div>
+      )}
     </form>
   );
 }
@@ -394,7 +398,7 @@ export function AdminUsers() {
     return users
       .filter((u) => !query || u.name.includes(query) || u.email.includes(query))
       .filter((u) => dept === null || u.roles.some((r) => r.departmentId === dept))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
   }, [users, q, deptParam]);
 
   return (
@@ -470,8 +474,27 @@ export function AdminUsers() {
         onDone={() => void revalidate()}
       />
 
-      <div className="bg-card rounded-lg border">
-        <Table stack>
+      {shown.length === 0 && (
+        <p className="text-muted-foreground py-6 text-center text-sm">該当するユーザーがいません</p>
+      )}
+      <MobileList>
+        {shown.map((u) => (
+          <ListRow
+            key={u.id}
+            title={u.name}
+            badge={u.isAdmin && <Badge variant="secondary">管理者</Badge>}
+            sub={u.roles.map((r) => deptName(r.departmentId)).join('・') || '部門なし'}
+            onClick={() => setEditing(u)}
+            aside={
+              <Button asChild size="sm" variant="ghost">
+                <Link to={`/admin/users/${u.id}/availability`}>希望</Link>
+              </Button>
+            }
+          />
+        ))}
+      </MobileList>
+      <div className="bg-card hidden rounded-lg border sm:block">
+        <Table>
           <TableHeader>
             <TableRow>
               <TableHead>氏名</TableHead>
@@ -484,7 +507,7 @@ export function AdminUsers() {
           <TableBody>
             {shown.map((u) => (
               <TableRow key={u.id}>
-                <TableCell data-primary>
+                <TableCell>
                   {u.name}
                   {u.isAdmin && (
                     <Badge variant="secondary" className="ml-2">
@@ -492,10 +515,8 @@ export function AdminUsers() {
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell data-label="メール" className="break-all">
-                  {u.email}
-                </TableCell>
-                <TableCell data-label="部門" className="whitespace-normal">
+                <TableCell>{u.email}</TableCell>
+                <TableCell className="whitespace-normal">
                   {u.roles
                     .map(
                       (r) =>
@@ -503,10 +524,10 @@ export function AdminUsers() {
                     )
                     .join('、')}
                 </TableCell>
-                <TableCell data-label="目標/上限(h)">
+                <TableCell>
                   {toHours(u.targetMinutes) || '-'} / {toHours(u.maxMinutes) || '-'}
                 </TableCell>
-                <TableCell data-actions className="space-x-2 text-right whitespace-nowrap">
+                <TableCell className="space-x-2 text-right whitespace-nowrap">
                   <Button asChild size="sm" variant="outline">
                     <Link to={`/admin/users/${u.id}/availability`}>希望</Link>
                   </Button>
@@ -516,13 +537,6 @@ export function AdminUsers() {
                 </TableCell>
               </TableRow>
             ))}
-            {shown.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground text-center">
-                  該当するユーザーがいません
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </div>

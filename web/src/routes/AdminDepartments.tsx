@@ -85,11 +85,7 @@ export function AdminDepartments() {
                 u.roles.some((r) => r.departmentId === d.id),
               ).length;
               const slotCount = slots.filter((s) => s.departmentId === d.id).length;
-              // 所属者か枠がある部門は削除できない。押せない理由を表示する
-              const blocked =
-                members > 0 || slotCount > 0
-                  ? `所属者 ${members} 人・枠 ${slotCount} 件があるため削除できません`
-                  : null;
+              const blocked = members > 0 || slotCount > 0;
               return (
                 <TableRow key={d.id}>
                   <TableCell data-primary>
@@ -140,20 +136,16 @@ export function AdminDepartments() {
                     >
                       名前を変更
                     </Button>
-                    <span title={blocked ?? undefined}>
+                    {/* 所属者か枠がある部門は削除できないので、ボタンを出さない */}
+                    {!blocked && (
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={!!blocked || pending}
+                        disabled={pending}
                         onClick={() => void remove(d)}
                       >
                         削除
                       </Button>
-                    </span>
-                    {blocked && (
-                      <span className="text-muted-foreground block w-full text-xs whitespace-normal">
-                        {blocked}
-                      </span>
                     )}
                   </TableCell>
                 </TableRow>

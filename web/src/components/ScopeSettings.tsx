@@ -302,7 +302,7 @@ function EventDaysCard({
               <button
                 type="button"
                 aria-label={`${md(d)}を日程から外す`}
-                className="px-1"
+                className="-my-1 -mr-1 inline-flex size-8 items-center justify-center rounded sm:size-auto sm:px-1"
                 disabled={list.length <= 1}
                 onClick={() => setList(list.filter((x) => x !== d))}
               >

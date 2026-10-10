@@ -19,6 +19,7 @@ export function Onboarding() {
 
   return (
     <Page>
+      <p className="text-center text-lg font-bold">Kosensai HR</p>
       <Card>
         <CardHeader>
           <CardTitle>{none ? 'はじめに' : 'シフト希望の入力が必要な役職'}</CardTitle>
@@ -48,7 +49,11 @@ export function Onboarding() {
           {error && <ErrorAlert>{error}</ErrorAlert>}
         </CardContent>
         <CardFooter>
-          <Button disabled={(!none && !checked) || pending} onClick={() => void submit()}>
+          <Button
+            className="w-full sm:w-fit"
+            disabled={(!none && !checked) || pending}
+            onClick={() => void submit()}
+          >
             {none ? 'はじめる' : '確認して進む'}
           </Button>
         </CardFooter>

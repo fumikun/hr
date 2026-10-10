@@ -125,22 +125,23 @@ export function PostForm({
         </div>
       )}
       {error && <ErrorAlert>{error}</ErrorAlert>}
-      <div className="flex justify-end gap-2">
-        {remove && (
+      <Button type="submit" className="w-full sm:w-fit" disabled={pending}>
+        {pending ? '保存中…' : '保存'}
+      </Button>
+      {/* 押し間違えないよう、削除は保存から離して置く */}
+      {remove && (
+        <div className="border-t pt-4">
           <Button
             type="button"
-            variant="destructive"
-            className="mr-auto"
+            variant="outline"
+            className="text-destructive w-full sm:w-fit"
             disabled={pending}
             onClick={() => void del()}
           >
-            削除
+            この持ち場を削除
           </Button>
-        )}
-        <Button type="submit" disabled={pending}>
-          {pending ? '保存中…' : '保存'}
-        </Button>
-      </div>
+        </div>
+      )}
     </form>
   );
 }

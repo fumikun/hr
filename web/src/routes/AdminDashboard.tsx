@@ -196,6 +196,18 @@ export function AdminDashboard() {
   return (
     <Page wide>
       <h1 className="text-2xl font-bold">ダッシュボード</h1>
+      {d.assign.excludedSlotIds.length > 0 && (
+        <Notice kind="warning">
+          対象日以外のシフト枠が {d.assign.excludedSlotIds.length}{' '}
+          件あります（割り当てに使われません）。
+          <Link
+            to="/admin/slots"
+            className="ml-1 inline-flex min-h-10 items-center underline sm:min-h-0"
+          >
+            シフト枠を確認
+          </Link>
+        </Notice>
+      )}
       <Checklist steps={steps} detail={detail} />
 
       {showCapacity && (

@@ -34,6 +34,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { dateKey, dayStart, hm, md, mdRange } from '@/lib/datetime';
 import { useAction } from '@/lib/useAction';
+import { cn } from '@/lib/utils';
+import { useDeptId } from '@/lib/useDeptId';
 import { useQueryParam, useSetQueryParams } from '@/lib/useQueryParam';
 
 export type AdminSlotsData = {
@@ -41,6 +43,9 @@ export type AdminSlotsData = {
   posts: Post[];
   slots: Slot[];
   users: AdminUser[];
+  /** 対象日以外にあるため、割り当て・希望入力に使われない枠 */
+  excludedSlotIds: number[];
+  eventDays: string[];
 };
 
 const toIso = (date: string, time: string) => new Date(`${date}T${time}`).toISOString();
@@ -345,18 +350,25 @@ function GeneratorForm({
 const ZOOMS = [64, 96, 144, 224];
 
 export function AdminSlots() {
-  const { departments, posts, slots } = useLoaderData<AdminSlotsData>();
+  const { departments, posts, slots, excludedSlotIds, eventDays } = useLoaderData<AdminSlotsData>();
   const { revalidate } = useRevalidator();
-  const [deptParam] = useQueryParam('dept');
   const [dayParam, setDay] = useQueryParam('day');
   const setQuery = useSetQueryParams();
-  const deptId = departments.find((d) => String(d.id) === deptParam)?.id ?? departments[0]?.id ?? 0;
+  const deptId = useDeptId(departments);
   const deptPosts = useMemo(() => posts.filter((p) => p.departmentId === deptId), [posts, deptId]);
   const deptSlots = useMemo(() => slots.filter((s) => s.departmentId === deptId), [slots, deptId]);
+  // 日付は、調整する日程と、この部門に枠がある日（日程外の枠も見つけられるように）
   const days = useMemo(
-    () => [...new Set(deptSlots.map((s) => dateKey(s.startsAt)))].sort(),
-    [deptSlots],
+    () => [...new Set([...eventDays, ...deptSlots.map((s) => dateKey(s.startsAt))])].sort(),
+    [eventDays, deptSlots],
   );
+  const excluded = useMemo(() => new Set(excludedSlotIds), [excludedSlotIds]);
+  const deptExcluded = deptSlots.filter((s) => excluded.has(s.id));
+  // その日の枠がすべて使われない日（日程外の日など）
+  const offDay = (d: string) =>
+    !eventDays.includes(d) ||
+    (deptSlots.some((s) => dateKey(s.startsAt) === d) &&
+      deptSlots.filter((s) => dateKey(s.startsAt) === d).every((s) => excluded.has(s.id)));
   const date =
     dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : (days[0] ?? dateKey(new Date()));
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -428,7 +440,7 @@ export function AdminSlots() {
   return (
     <Page wide>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold">部門・シフト枠設定</h1>
+        <h1 className="text-2xl font-bold">シフト枠</h1>
         {deptPosts.length > 0 && daySlots.length + deptSlots.length > 0 && (
           <Button variant="outline" onClick={() => setGenOpen(true)}>
             枠をまとめて生成
@@ -458,7 +470,10 @@ export function AdminSlots() {
         <span className="text-muted-foreground">
           {deptPosts.length === 0 ? 'まだありません' : deptPosts.map((p) => p.name).join('・')}
         </span>
-        <Link to={`/admin/posts?dept=${deptId}`} className="text-primary underline">
+        <Link
+          to={`/admin/posts?dept=${deptId}`}
+          className="text-primary inline-flex min-h-10 items-center underline sm:min-h-0"
+        >
           持ち場を編集する
         </Link>
       </section>
@@ -481,28 +496,27 @@ export function AdminSlots() {
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="日付">
-              {(id) => (
-                <Input
-                  id={id}
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDay(e.target.value);
-                    closeDialogs();
-                  }}
-                />
-              )}
-            </Field>
+          {deptExcluded.length > 0 && (
+            <Notice kind="warning">
+              対象日以外の枠が {deptExcluded.length} 件あります（
+              {[...new Set(deptExcluded.map((s) => md(s.startsAt)))].join('・')}
+              ）。割り当てと希望入力には使われません。
+            </Notice>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
             {days.map((d) => (
               <Button
                 key={d}
                 size="sm"
                 variant={d === date ? 'default' : 'outline'}
-                onClick={() => setDay(d)}
+                className={cn(offDay(d) && d !== date && 'text-muted-foreground')}
+                onClick={() => {
+                  setDay(d);
+                  closeDialogs();
+                }}
               >
                 {md(d)}
+                {offDay(d) && <span className="text-xs">対象外</span>}
               </Button>
             ))}
             <div className="ml-auto flex items-center gap-2">

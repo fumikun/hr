@@ -6,16 +6,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useQueryParam, useSetQueryParams } from '@/lib/useQueryParam';
+import { useDeptId } from '@/lib/useDeptId';
+import { useSetQueryParams } from '@/lib/useQueryParam';
 
 export type AdminPostsData = { departments: Department[]; posts: Post[]; users: AdminUser[] };
 
 /** 持ち場の一覧。編集は1件ずつ別画面で行う */
 export function AdminPosts() {
   const { departments, posts } = useLoaderData<AdminPostsData>();
-  const [deptParam] = useQueryParam('dept');
   const setQuery = useSetQueryParams();
-  const deptId = departments.find((d) => String(d.id) === deptParam)?.id ?? departments[0]?.id ?? 0;
+  const deptId = useDeptId(departments);
   const deptPosts = posts.filter((p) => p.departmentId === deptId);
 
   return (

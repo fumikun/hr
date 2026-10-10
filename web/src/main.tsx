@@ -206,13 +206,22 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            const [departments, posts, slots, users] = await Promise.all([
+            const [departments, posts, slots, users, assign, scopes] = await Promise.all([
               adminApi.departments(),
               postApi.list(),
               slotApi.list(),
               adminApi.users(),
+              assignApi.data(),
+              scopeApi.get(),
             ]);
-            return { departments, posts, slots, users };
+            return {
+              departments,
+              posts,
+              slots,
+              users,
+              excludedSlotIds: assign.excludedSlotIds,
+              eventDays: scopes.eventDays,
+            };
           }),
       },
       {
@@ -299,7 +308,14 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            return { rows: await auditApi.list() };
+            const [rows, users, departments, posts, slots] = await Promise.all([
+              auditApi.list(),
+              adminApi.users(),
+              adminApi.departments(),
+              postApi.list(),
+              slotApi.list(),
+            ]);
+            return { rows, users, departments, posts, slots };
           }),
       },
     ],

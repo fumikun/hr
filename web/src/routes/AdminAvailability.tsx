@@ -20,6 +20,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ListRow, MobileList } from '@/components/ListRow';
 import {
   Select,
   SelectContent,
@@ -229,49 +230,63 @@ export function AdminAvailability() {
               未入力 {missing.length} 人の名前とメールをコピー
             </Button>
           )}
-          <div className="bg-card rounded-lg border">
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>氏名</TableHead>
-                  <TableHead>メール</TableHead>
-                  <TableHead>状況</TableHead>
-                  <TableHead>最終保存</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((s) => (
-                  <TableRow key={s.userId}>
-                    <TableCell data-primary>{s.name}</TableCell>
-                    <TableCell data-label="メール" className="break-all">
-                      {s.email}
-                    </TableCell>
-                    <TableCell data-label="状況">
-                      {s.submittedAt ? (
-                        <Badge>保存済み</Badge>
-                      ) : (
-                        <Badge variant="destructive">未入力</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell data-label="最終保存">{fmtDateTime(s.submittedAt, '—')}</TableCell>
-                    <TableCell data-actions className="text-right">
-                      <Button asChild size="sm" variant="outline">
-                        <Link to={`/admin/users/${s.userId}/availability`}>代理入力</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {rows.length === 0 && (
+          {rows.length === 0 && (
+            <p className="text-muted-foreground py-6 text-center text-sm">該当する人はいません</p>
+          )}
+          {/* スマホ: 1人1行。押すと代理入力へ */}
+          <MobileList>
+            {rows.map((s) => (
+              <ListRow
+                key={s.userId}
+                title={s.name}
+                badge={
+                  s.submittedAt ? (
+                    <Badge>保存済み</Badge>
+                  ) : (
+                    <Badge variant="destructive">未入力</Badge>
+                  )
+                }
+                sub={s.submittedAt ? `最終保存 ${fmtDateTime(s.submittedAt)}` : s.email}
+                to={`/admin/users/${s.userId}/availability`}
+              />
+            ))}
+          </MobileList>
+          {rows.length > 0 && (
+            <div className="bg-card hidden rounded-lg border sm:block">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={5} className="text-muted-foreground text-center">
-                      該当する人はいません
-                    </TableCell>
+                    <TableHead>氏名</TableHead>
+                    <TableHead>メール</TableHead>
+                    <TableHead>状況</TableHead>
+                    <TableHead>最終保存</TableHead>
+                    <TableHead />
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((s) => (
+                    <TableRow key={s.userId}>
+                      <TableCell>{s.name}</TableCell>
+                      <TableCell>{s.email}</TableCell>
+                      <TableCell>
+                        {s.submittedAt ? (
+                          <Badge>保存済み</Badge>
+                        ) : (
+                          <Badge variant="destructive">未入力</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{fmtDateTime(s.submittedAt, '—')}</TableCell>
+                      <TableCell className="text-right">
+                        <Button asChild size="sm" variant="outline">
+                          <Link to={`/admin/users/${s.userId}/availability`}>代理入力</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </>
       )}
     </Page>

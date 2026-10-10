@@ -42,8 +42,15 @@ export function AdminPrint() {
   const postName = (id: number) => posts.find((p) => p.id === id)?.name ?? '';
 
   const dept = deptParam ? Number(deptParam) : null;
-  const allDays = [...new Set(slots.map((s) => dateKey(s.startsAt)))].sort();
+  const allDays = [
+    ...new Set(
+      slots.filter((s) => !assign.excludedSlotIds.includes(s.id)).map((s) => dateKey(s.startsAt)),
+    ),
+  ].sort();
+  // 対象日以外の枠は、割り当てに使われないので印刷にも出さない
+  const excluded = new Set(assign.excludedSlotIds);
   const sorted = [...slots]
+    .filter((s) => !excluded.has(s.id))
     .filter((s) => dept === null || s.departmentId === dept)
     .filter((s) => !dayParam || dateKey(s.startsAt) === dayParam)
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.postId - b.postId);

@@ -4,21 +4,28 @@ import { Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { hm, mdhm } from '@/lib/datetime';
 
 export type HomeData = { me: Me; availability: AvailabilityData; shifts: MyShift[] };
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const when = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-const hm = (iso: string) => `${pad(new Date(iso).getHours())}:${pad(new Date(iso).getMinutes())}`;
+const when = mdhm;
 
 /** ログイン後の最初の画面。やること（希望入力）と次のシフトを先頭に出す */
 export function Home() {
   const { me, availability: a, shifts } = useLoaderData<HomeData>();
   const needsInput = a.departments.length > 0;
   const upcoming = shifts.filter((s) => new Date(s.endsAt).getTime() > Date.now()).slice(0, 3);
+  // 締切は部門ごとに違うことがあるので、受付中の部門のうち最も早い締切を出す（希望入力の画面と合わせる）
+  const closesAt =
+    a.departments
+      .filter((d) => d.open && d.closesAt)
+      .map((d) => d.closesAt!)
+      .sort()[0] ?? null;
+  const opensAt =
+    a.departments
+      .map((d) => d.opensAt)
+      .filter((x): x is string => !!x && new Date(x).getTime() > Date.now())
+      .sort()[0] ?? null;
 
   return (
     <Page>
@@ -32,11 +39,11 @@ export function Home() {
               {a.open ? <Badge>受付中</Badge> : <Badge variant="secondary">受付していません</Badge>}
             </CardTitle>
             <CardDescription>
-              {a.open && a.period.closesAt
-                ? `締切: ${when(a.period.closesAt)}`
-                : a.period.opensAt && new Date(a.period.opensAt).getTime() > Date.now()
-                  ? `受付開始: ${when(a.period.opensAt)}`
-                  : '受付期間が終了しているか、まだ設定されていません。'}
+              {a.open && closesAt
+                ? `締切 ${when(closesAt)}`
+                : opensAt
+                  ? `受付開始 ${when(opensAt)}`
+                  : '受付期間外です'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -78,9 +85,11 @@ export function Home() {
               ))}
             </ul>
           )}
-          <Button asChild variant="outline" size="sm">
-            <Link to="/shifts">すべてのシフトを見る</Link>
-          </Button>
+          {shifts.length > 0 && (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/shifts">すべてのシフトを見る</Link>
+            </Button>
+          )}
         </CardContent>
       </Card>
     </Page>

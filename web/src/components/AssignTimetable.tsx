@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { candidatesApi, type AdminUser, type AssignmentRow, type Post, type Slot } from '../api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { pickRecommendation } from '@/lib/assignNav';
 import { hm, hoursLabel } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 
@@ -437,18 +438,10 @@ export function SlotPanel({
     void candidatesApi(slot.id).then((cands) => {
       if (!alive) return;
       const byId = new Map(users.map((u) => [u.id, u]));
-      const remain = (c: { userId: number; assignedMinutes: number }) => {
-        const target = byId.get(c.userId)?.targetMinutes;
-        return target == null ? -Infinity : target - c.assignedMinutes;
-      };
-      const top = cands
-        .filter((c) => c.reasons.length === 0 && byId.has(c.userId))
-        .sort(
-          (a, b) =>
-            Number(b.wants) - Number(a.wants) ||
-            remain(b) - remain(a) ||
-            a.assignedMinutes - b.assignedMinutes,
-        )[0];
+      const top = pickRecommendation(
+        cands.filter((c) => byId.has(c.userId)),
+        (id) => byId.get(id)?.targetMinutes,
+      );
       setBest(top ? { user: byId.get(top.userId)!, ...top } : null);
     });
     return () => {

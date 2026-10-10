@@ -30,7 +30,10 @@ export function AdminPostEdit() {
 
   return (
     <Page>
-      <Link to={back} className="text-muted-foreground text-sm hover:underline">
+      <Link
+        to={back}
+        className="text-muted-foreground inline-flex min-h-10 items-center text-sm hover:underline sm:min-h-0"
+      >
         ← 持ち場の一覧に戻る
       </Link>
       <h1 className="text-2xl font-bold">{post ? '持ち場を編集' : '持ち場を追加'}</h1>
@@ -41,7 +44,7 @@ export function AdminPostEdit() {
         key={post?.id ?? 'new'}
         initial={post ?? { name: '', restricted: false, memberIds: [] }}
         candidates={candidates}
-        onDone={() => navigate(back)}
+        onDone={() => void navigate(back)}
         save={(p) => (post ? postApi.update(post.id, p) : postApi.create(deptId, p))}
         remove={post ? () => postApi.remove(post.id) : undefined}
       />

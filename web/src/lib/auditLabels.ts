@@ -13,6 +13,8 @@ export const ACTION: Record<string, string> = {
   'post.update': '持ち場の編集',
   'post.delete': '持ち場の削除',
   'settings.availability_period': '希望の受付期間を変更',
+  'settings.event_days': '調整する日程を変更',
+  'settings.scope': '部門・持ち場の受付設定を変更',
   'availability.save': '希望を保存',
   'availability.admin_edit': '希望を管理者が編集',
   'assign.run': '自動割り当て',

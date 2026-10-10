@@ -19,7 +19,6 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import { ErrorAlert, Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -32,8 +31,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { dateKey, fmtDateTime, hoursLabel, md, mdRange, minutesBetween } from '@/lib/datetime';
+import { nextShortage } from '@/lib/assignNav';
 import { withLock, withoutPair, withPair } from '@/lib/assignLocal';
 import { useAction } from '@/lib/useAction';
+import { useDeptId } from '@/lib/useDeptId';
 import { useQueryParam, useSetQueryParams } from '@/lib/useQueryParam';
 import { cn } from '@/lib/utils';
 
@@ -98,17 +99,15 @@ function RunPanel({ run, onFinished }: { run: AssignRun | null; onFinished: () =
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>① 自動割り当て</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    // ボタン1つと実行結果だけなので、カードにせず1行にまとめる
+    <section className="space-y-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         <Button
           className="w-full sm:w-fit"
           disabled={running || pending}
           onClick={() => void start()}
         >
-          {running ? '実行中…' : '自動割り当てを実行'}
+          {running ? '実行中…' : '① 自動割り当てを実行'}
         </Button>
         {running && current && (
           <p className="text-sm" role="status">
@@ -123,12 +122,12 @@ function RunPanel({ run, onFinished }: { run: AssignRun | null; onFinished: () =
             {current.result.solverStatus !== 'Optimal' && '（時間切れのため最良の解）'}
           </p>
         )}
-        {current?.status === 'failed' && (
-          <ErrorAlert>前回の実行は失敗しました: {current.error}</ErrorAlert>
-        )}
-        {error && <ErrorAlert>{error}</ErrorAlert>}
-      </CardContent>
-    </Card>
+      </div>
+      {current?.status === 'failed' && (
+        <ErrorAlert>前回の実行は失敗しました: {current.error}</ErrorAlert>
+      )}
+      {error && <ErrorAlert>{error}</ErrorAlert>}
+    </section>
   );
 }
 
@@ -149,6 +148,8 @@ function AddDialog({
 }) {
   const [cands, setCands] = useState<Candidate[] | null>(null);
   const [query, setQuery] = useState('');
+  // 部門外の人は、ふだんは候補に出さない（100人いると候補の大半が追加できない人になるため）
+  const [showOutside, setShowOutside] = useState(false);
   const confirm = useConfirm();
   const { run, error, clearError } = useAction();
   const [adding, setAdding] = useState<number | null>(null);
@@ -161,13 +162,17 @@ function AddDialog({
   }, [slotId, assignedKey]);
   useEffect(() => {
     setQuery('');
+    setShowOutside(false);
     clearError();
   }, [slotId, clearError]);
 
+  const outside = (c: Candidate) => c.reasons.includes('not_in_department');
+  const outsideCount = (cands ?? []).filter(outside).length;
   const rows = useMemo(() => {
     const byId = new Map(users.map((u) => [u.id, u]));
     return (
       (cands ?? [])
+        .filter((c) => showOutside || !c.reasons.includes('not_in_department'))
         .map((c) => ({ ...c, user: byId.get(c.userId)! }))
         .filter((c) => c.user && (c.user.name.includes(query) || c.user.email.includes(query)))
         // 入れる人（警告なし）→ 入りたい人を先頭 → 勤務時間が少ない人
@@ -178,7 +183,7 @@ function AddDialog({
             a.assignedMinutes - b.assignedMinutes,
         )
     );
-  }, [cands, users, query]);
+  }, [cands, users, query, showOutside]);
 
   async function add(userId: number, warn: boolean) {
     if (
@@ -256,6 +261,18 @@ function AddDialog({
             <li className="text-muted-foreground text-sm">該当する人がいません</li>
           )}
         </ul>
+        {outsideCount > 0 && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="outside"
+              checked={showOutside}
+              onCheckedChange={(v) => setShowOutside(v === true)}
+            />
+            <Label htmlFor="outside" className="font-normal">
+              部門外の人も表示（{outsideCount} 人）
+            </Label>
+          </div>
+        )}
         <Button variant="outline" onClick={onClose}>
           閉じる
         </Button>
@@ -304,8 +321,8 @@ function PublishBar({
                     return (
                       <li key={s.slotId}>
                         {slot &&
-                          `${deptName(slot.departmentId)} ${mdRange(slot.startsAt, slot.endsAt)}`}
-                        あと{s.missing}人
+                          `${deptName(slot.departmentId)} ${mdRange(slot.startsAt, slot.endsAt)}`}{' '}
+                        <b>あと{s.missing}人</b>
                       </li>
                     );
                   })}
@@ -388,7 +405,6 @@ export function AdminAssign() {
   const confirm = useConfirm();
   const { run: act, pending, error } = useAction();
   const refresh = () => void revalidate();
-  const [deptParam] = useQueryParam('dept');
   const [dayParam, setDay] = useQueryParam('day');
   const setQuery = useSetQueryParams();
   const [viewParam, setView] = useQueryParam('view');
@@ -398,7 +414,7 @@ export function AdminAssign() {
   const [openPerson, setOpenPerson] = useState<number | null>(null);
 
   const view = viewParam === 'people' ? 'people' : 'slots';
-  const deptId = departments.find((d) => String(d.id) === deptParam)?.id ?? departments[0]?.id ?? 0;
+  const deptId = useDeptId(departments);
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const slotById = useMemo(() => new Map(slots.map((s) => [s.id, s])), [slots]);
@@ -439,12 +455,8 @@ export function AdminAssign() {
     .sort((x, y) => x.startsAt.localeCompare(y.startsAt) || x.id - y.id);
   // 次の不足へ: 選んでいる枠より後ろの不足から順に。最後まで行ったら先頭に戻る
   function gotoNextShortage() {
-    if (shortSlots.length === 0) return;
-    const cur = selectedSlot;
-    const next =
-      shortSlots.find(
-        (x) => cur && (x.startsAt > cur.startsAt || (x.startsAt === cur.startsAt && x.id > cur.id)),
-      ) ?? shortSlots[0]!;
+    const next = nextShortage(shortSlots, selectedSlot);
+    if (!next) return;
     setQuery({ dept: String(next.departmentId), day: dateKey(next.startsAt) });
     setSelected(next.id);
   }
@@ -535,7 +547,7 @@ export function AdminAssign() {
 
   return (
     <Page wide>
-      <h1 className="text-2xl font-bold">自動割り当て・手動修正</h1>
+      <h1 className="text-2xl font-bold">割り当て</h1>
       <RunPanel run={run} onFinished={refresh} />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
