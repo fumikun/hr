@@ -68,6 +68,22 @@ const cacheHeaders = (path: string, c: Context) => {
     path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
   );
 };
+// Entra ID のパブリッシャードメイン検証は拡張子なしのURLも取りに来るため、両方を application/json で返す
+for (const path of [
+  '/.well-known/microsoft-identity-association',
+  '/.well-known/microsoft-identity-association.json',
+]) {
+  root.get(
+    path,
+    serveStatic({
+      path: '../web/dist/.well-known/microsoft-identity-association.json',
+      onFound: (_p, c) => {
+        c.header('Content-Type', 'application/json');
+        c.header('Cache-Control', 'no-cache');
+      },
+    }),
+  );
+}
 root.use('*', serveStatic({ root: '../web/dist', onFound: cacheHeaders }));
 root.get('*', serveStatic({ path: '../web/dist/index.html', onFound: cacheHeaders }));
 

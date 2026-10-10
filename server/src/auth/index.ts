@@ -1,5 +1,6 @@
 import type { AuthConfig } from '@auth/core';
 import Credentials from '@auth/core/providers/credentials';
+import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
 import { isDevLoginEnabled } from './devLogin.js';
 import { isSignInAllowed, type FindUser } from './signIn.js';
 
@@ -23,7 +24,19 @@ export function createAuthConfig(
       }),
     );
   }
-  // TODO: Microsoft Entra ID / Email プロバイダ
+  // Microsoft Entra ID: クライアントID/シークレットが揃っているときだけ登録する。
+  // テナントが1つだけ許可されている場合は、そのテナントを issuer に固定する。
+  const clientId = env.AUTH_MICROSOFT_ENTRA_ID_ID;
+  const clientSecret = env.AUTH_MICROSOFT_ENTRA_ID_SECRET;
+  if (clientId && clientSecret) {
+    const issuer =
+      env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ??
+      (allowedTids.length === 1
+        ? `https://login.microsoftonline.com/${allowedTids[0]}/v2.0`
+        : undefined);
+    providers.push(MicrosoftEntraID({ clientId, clientSecret, ...(issuer ? { issuer } : {}) }));
+  }
+  // TODO: Email プロバイダ
 
   return {
     secret: env.AUTH_SECRET,
