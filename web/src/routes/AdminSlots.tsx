@@ -185,24 +185,56 @@ function Editor({
   );
 }
 
+// 枠をまとめて作るときの初期の日付（イベントの2日間）
+const DEFAULT_FROM = '2026-11-07';
+const DEFAULT_TO = '2026-11-08';
+
+const GENERATED_KEY = 'hr.slotGenerator';
+const GENERATED_DEFAULTS = {
+  from: DEFAULT_FROM,
+  to: DEFAULT_TO,
+  start: '09:00',
+  end: '18:30',
+  slotMinutes: 60,
+  min: 1,
+  max: 1,
+};
+type GeneratedValues = typeof GENERATED_DEFAULTS;
+
+/** 前回まとめて作成したときの値（なければ初期値）。ブラウザに残す */
+function loadLastGenerated(): GeneratedValues {
+  try {
+    const v = JSON.parse(localStorage.getItem(GENERATED_KEY) ?? 'null') as Partial<GeneratedValues>;
+    return { ...GENERATED_DEFAULTS, ...v };
+  } catch {
+    return GENERATED_DEFAULTS;
+  }
+}
+function saveLastGenerated(v: GeneratedValues) {
+  try {
+    localStorage.setItem(GENERATED_KEY, JSON.stringify(v));
+  } catch {
+    // 保存できなくても作成には影響しない
+  }
+}
+
 /** 設定から枠をまとめて作る。枠がない部門では、画面の中央に大きく出す */
 function GeneratorForm({
   posts,
-  date,
   onDone,
 }: {
   posts: Post[];
-  date: string;
   onDone: () => void;
 }) {
   const [postId, setPostId] = useState(posts[0]?.id ?? 0);
-  const [from, setFrom] = useState(date);
-  const [to, setTo] = useState(date);
-  const [start, setStart] = useState('09:00');
-  const [end, setEnd] = useState('17:00');
-  const [slotMinutes, setSlotMinutes] = useState(90);
-  const [min, setMin] = useState(1);
-  const [max, setMax] = useState(3);
+  const [last] = useState(loadLastGenerated);
+  const [from, setFrom] = useState(last.from);
+  const [to, setTo] = useState(last.to);
+  const [start, setStart] = useState(last.start);
+  const [end, setEnd] = useState(last.end);
+  const [slotMinutes, setSlotMinutes] = useState(last.slotMinutes);
+  const [min, setMin] = useState(last.min);
+  const [max, setMax] = useState(last.max);
   const [localError, setLocalError] = useState('');
   const { run, pending, error } = useAction();
 
@@ -229,7 +261,13 @@ function GeneratorForm({
     }
     void run(
       () => slotApi.generate({ postId, windows, slotMinutes, minPeople: min, maxPeople: max }),
-      { success: '枠を作成しました', onSuccess: onDone },
+      {
+        success: '枠を作成しました',
+        onSuccess: () => {
+          saveLastGenerated({ from, to, start, end, slotMinutes, min, max });
+          onDone();
+        },
+      },
     );
   }
 
@@ -379,7 +417,7 @@ export function AdminSlots() {
   const [genOpen, setGenOpen] = useState(false);
   const [touchEdit, setTouchEdit] = useState(false);
   // 枠を追加するときの人数は、前回入力した値を引き継ぐ
-  const [lastPeople, setLastPeople] = useState({ min: 1, max: 3 });
+  const [lastPeople, setLastPeople] = useState({ min: 1, max: 1 });
   const [notice, setNotice] = useState('');
 
   const daySlots = deptSlots.filter((s) => dateKey(s.startsAt) === date);
@@ -491,7 +529,7 @@ export function AdminSlots() {
             <CardTitle>この部門にはまだ枠がありません</CardTitle>
           </CardHeader>
           <CardContent>
-            <GeneratorForm posts={deptPosts} date={date} onDone={refresh} />
+            <GeneratorForm posts={deptPosts} onDone={refresh} />
           </CardContent>
         </Card>
       ) : (
@@ -625,7 +663,6 @@ export function AdminSlots() {
           <GeneratorForm
             key={deptId}
             posts={deptPosts}
-            date={date}
             onDone={() => {
               setGenOpen(false);
               refresh();

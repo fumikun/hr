@@ -88,5 +88,13 @@ root.use('*', serveStatic({ root: '../web/dist', onFound: cacheHeaders }));
 root.get('*', serveStatic({ path: '../web/dist/index.html', onFound: cacheHeaders }));
 
 const port = Number(process.env.PORT ?? 3001);
-serve({ fetch: root.fetch, port });
+const server = serve({ fetch: root.fetch, port });
 console.log(`listening on :${port}`);
+
+// ローリング更新時: SIGTERMで新規接続の受付を止め、処理中のリクエストを終えてから終了する
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down');
+  server.close(() => process.exit(0));
+  // 長く掴まれた接続があっても猶予時間内に必ず終了する
+  setTimeout(() => process.exit(0), 20_000).unref();
+});
