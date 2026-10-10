@@ -42,9 +42,9 @@ export function Home() {
           <CardContent className="space-y-3">
             <p className="text-sm">
               {a.submittedAt
-                ? `入力済み（最終保存 ${when(a.submittedAt)}）。受付期間内は何度でも修正できます。`
+                ? `入力済み（最終保存 ${when(a.submittedAt)}）`
                 : a.open
-                  ? 'まだ入力していません。入れない時間帯と、入りたい時間帯を教えてください。'
+                  ? '未入力です'
                   : '入力の記録はありません。'}
             </p>
             <Button asChild variant={a.open && !a.submittedAt ? 'default' : 'outline'}>
@@ -61,18 +61,16 @@ export function Home() {
         <CardContent className="space-y-3">
           {upcoming.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              {shifts.length === 0
-                ? 'シフトが確定すると、ここに表示されます。'
-                : '今後のシフトはありません。'}
+              {shifts.length === 0 ? 'まだ公開されていません' : '今後のシフトはありません。'}
             </p>
           ) : (
             <ul className="divide-y">
               {upcoming.map((s) => (
-                <li key={s.slotId} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium tabular-nums">
+                <li key={s.slotId} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="shrink-0 font-medium tabular-nums">
                     {when(s.startsAt)}–{hm(s.endsAt)}
                   </span>
-                  <span>
+                  <span className="text-right">
                     {s.department}
                     <span className="text-muted-foreground ml-1 text-xs">{s.post}</span>
                   </span>

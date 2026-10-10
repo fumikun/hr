@@ -14,13 +14,7 @@ import { ErrorAlert, Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -278,12 +272,12 @@ function CsvDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+        aria-describedby={undefined}
+      >
         <DialogHeader>
           <DialogTitle>CSVで一括登録</DialogTitle>
-          <DialogDescription>
-            同じメールアドレスは更新されます。1行でも誤りがあれば、何も登録しません。
-          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={template}>
@@ -328,11 +322,9 @@ function CsvDialog({
         )}
         {preview && (
           <div className="space-y-2">
-            <Notice kind="info">
-              {preview.length} 件を取り込めます。内容を確認して登録してください。
-            </Notice>
+            <Notice kind="info">{preview.length} 件を取り込めます。</Notice>
             <div className="max-h-48 overflow-auto rounded border">
-              <Table>
+              <Table stack>
                 <TableHeader>
                   <TableRow>
                     <TableHead>氏名</TableHead>
@@ -344,12 +336,14 @@ function CsvDialog({
                 <TableBody>
                   {preview.map((u) => (
                     <TableRow key={u.email}>
-                      <TableCell>
+                      <TableCell data-primary>
                         {u.name}
                         {u.isAdmin && <Badge className="ml-1">管理者</Badge>}
                       </TableCell>
-                      <TableCell>{u.email}</TableCell>
-                      <TableCell className="whitespace-normal">
+                      <TableCell data-label="メール" className="break-all">
+                        {u.email}
+                      </TableCell>
+                      <TableCell data-label="部門" className="whitespace-normal">
                         {u.roles
                           .map(
                             (r) =>
@@ -358,7 +352,7 @@ function CsvDialog({
                           )
                           .join('、')}
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="目標/上限(h)">
                         {toHours(u.targetMinutes) || '-'} / {toHours(u.maxMinutes) || '-'}
                       </TableCell>
                     </TableRow>
@@ -381,8 +375,6 @@ function CsvDialog({
   );
 }
 
-type SortKey = 'name' | 'target' | 'dept';
-
 export function AdminUsers() {
   const { users, departments } = useLoaderData<AdminUsersData>();
   const { revalidate } = useRevalidator();
@@ -390,8 +382,6 @@ export function AdminUsers() {
   const [csvOpen, setCsvOpen] = useState(false);
   const [q, setQ] = useQueryParam('q');
   const [deptParam, setDept] = useQueryParam('dept');
-  const [sortParam, setSort] = useQueryParam('sort');
-  const sort: SortKey = sortParam === 'target' || sortParam === 'dept' ? sortParam : 'name';
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '?';
   const done = () => {
     setEditing(null);
@@ -404,39 +394,37 @@ export function AdminUsers() {
     return users
       .filter((u) => !query || u.name.includes(query) || u.email.includes(query))
       .filter((u) => dept === null || u.roles.some((r) => r.departmentId === dept))
-      .sort((a, b) => {
-        if (sort === 'target') return (b.targetMinutes ?? -1) - (a.targetMinutes ?? -1);
-        if (sort === 'dept')
-          return (
-            (a.roles[0]?.departmentId ?? 999) - (b.roles[0]?.departmentId ?? 999) ||
-            a.name.localeCompare(b.name, 'ja')
-          );
-        return a.name.localeCompare(b.name, 'ja');
-      });
-  }, [users, q, deptParam, sort]);
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  }, [users, q, deptParam]);
 
   return (
     <Page wide>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">ユーザー管理</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setCsvOpen(true)}>
+        <div className="flex w-full gap-2 sm:w-auto">
+          <Button
+            variant="outline"
+            className="flex-1 sm:flex-none"
+            onClick={() => setCsvOpen(true)}
+          >
             CSVで一括登録
           </Button>
-          <Button onClick={() => setEditing('new')}>ユーザーを追加</Button>
+          <Button className="flex-1 sm:flex-none" onClick={() => setEditing('new')}>
+            ユーザーを追加
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
         <Input
           placeholder="名前・メールで検索"
           value={q ?? ''}
           onChange={(e) => setQ(e.target.value || null)}
-          className="max-w-xs"
+          className="col-span-2 sm:max-w-xs"
           aria-label="名前・メールで検索"
         />
         <Select value={deptParam ?? 'all'} onValueChange={(v) => setDept(v === 'all' ? null : v)}>
-          <SelectTrigger className="w-40" aria-label="部門で絞り込み">
+          <SelectTrigger className="w-full sm:w-40" aria-label="部門で絞り込み">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -448,28 +436,15 @@ export function AdminUsers() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={sort} onValueChange={(v) => setSort(v === 'name' ? null : v)}>
-          <SelectTrigger className="w-44" aria-label="並べ替え">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">名前順</SelectItem>
-            <SelectItem value="target">目標勤務時間が長い順</SelectItem>
-            <SelectItem value="dept">部門順</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="text-muted-foreground text-sm">
+        <span className="text-muted-foreground col-span-2 text-sm">
           {shown.length} / {users.length} 人
         </span>
       </div>
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{editing === 'new' ? 'ユーザーを追加' : 'ユーザーを編集'}</DialogTitle>
-            <DialogDescription>
-              希望入力が必要な部門にチェックすると、本人の初回確認画面に表示されます。
-            </DialogDescription>
           </DialogHeader>
           {editing && (
             <UserForm
@@ -496,7 +471,7 @@ export function AdminUsers() {
       />
 
       <div className="bg-card rounded-lg border">
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>氏名</TableHead>
@@ -509,7 +484,7 @@ export function AdminUsers() {
           <TableBody>
             {shown.map((u) => (
               <TableRow key={u.id}>
-                <TableCell>
+                <TableCell data-primary>
                   {u.name}
                   {u.isAdmin && (
                     <Badge variant="secondary" className="ml-2">
@@ -517,8 +492,10 @@ export function AdminUsers() {
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell>{u.email}</TableCell>
-                <TableCell className="whitespace-normal">
+                <TableCell data-label="メール" className="break-all">
+                  {u.email}
+                </TableCell>
+                <TableCell data-label="部門" className="whitespace-normal">
                   {u.roles
                     .map(
                       (r) =>
@@ -526,10 +503,10 @@ export function AdminUsers() {
                     )
                     .join('、')}
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="目標/上限(h)">
                   {toHours(u.targetMinutes) || '-'} / {toHours(u.maxMinutes) || '-'}
                 </TableCell>
-                <TableCell className="space-x-2 text-right whitespace-nowrap">
+                <TableCell data-actions className="space-x-2 text-right whitespace-nowrap">
                   <Button asChild size="sm" variant="outline">
                     <Link to={`/admin/users/${u.id}/availability`}>希望</Link>
                   </Button>

@@ -25,7 +25,7 @@ const LABEL: Record<string, string> = {
   solverStatus: '計算結果',
   userId: 'ユーザーID',
   slotId: '枠ID',
-  locked: '固定',
+  locked: 'ピン留め',
   source: '由来',
   status: '状態',
   id: 'ID',

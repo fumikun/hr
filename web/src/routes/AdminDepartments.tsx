@@ -62,18 +62,15 @@ export function AdminDepartments() {
           aria-label="新しい部門の名前"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="max-w-xs"
+          className="min-w-0 flex-1 sm:max-w-xs"
         />
         <Button type="submit" disabled={pending}>
           部門を追加
         </Button>
       </form>
-      <p className="text-muted-foreground text-sm">
-        追加すると、持ち場「全体」（部門の誰でも）が自動で作られます。
-      </p>
       {error && <ErrorAlert>{error}</ErrorAlert>}
       <div className="bg-card rounded-lg border">
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>部門</TableHead>
@@ -95,7 +92,7 @@ export function AdminDepartments() {
                   : null;
               return (
                 <TableRow key={d.id}>
-                  <TableCell>
+                  <TableCell data-primary>
                     {editing?.id === d.id ? (
                       <form
                         className="flex gap-2"
@@ -133,9 +130,9 @@ export function AdminDepartments() {
                       d.name
                     )}
                   </TableCell>
-                  <TableCell>{members}人</TableCell>
-                  <TableCell>{slotCount}枠</TableCell>
-                  <TableCell className="space-x-2 text-right whitespace-nowrap">
+                  <TableCell data-label="所属者">{members}人</TableCell>
+                  <TableCell data-label="枠">{slotCount}枠</TableCell>
+                  <TableCell data-actions className="space-x-2 text-right whitespace-nowrap">
                     <Button
                       size="sm"
                       variant="outline"
@@ -154,7 +151,9 @@ export function AdminDepartments() {
                       </Button>
                     </span>
                     {blocked && (
-                      <span className="text-muted-foreground block text-xs">{blocked}</span>
+                      <span className="text-muted-foreground block w-full text-xs whitespace-normal">
+                        {blocked}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>

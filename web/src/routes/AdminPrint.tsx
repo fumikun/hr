@@ -136,7 +136,7 @@ export function AdminPrint() {
             checked={includeDraft}
             onCheckedChange={(v) => setIncludeDraft(v === true)}
           />
-          <Label htmlFor="draft">下書き（未確定）も含める</Label>
+          <Label htmlFor="draft">未公開も含める</Label>
         </div>
         {mode === 'person' && (
           <div className="flex items-center gap-2">
@@ -151,27 +151,25 @@ export function AdminPrint() {
       </div>
       <div className="flex flex-wrap items-center gap-2 print:hidden">
         <Button onClick={() => window.print()}>印刷</Button>
-        <Button variant="outline" onClick={downloadAllCsv}>
-          全体一覧をCSVで保存
-        </Button>
-        <Button variant="outline" onClick={downloadPersonCsv}>
-          個人別をCSVで保存
+        {/* 表示中の形式に合わせて、個人別か全体一覧の CSV を保存する */}
+        <Button variant="outline" onClick={mode === 'person' ? downloadPersonCsv : downloadAllCsv}>
+          CSVで保存
         </Button>
       </div>
       {!includeDraft && shown.length === 0 && (
         <Notice kind="warning" className="print:hidden">
-          確定したシフトがありません。「下書きも含める」にすると、確認用に出力できます。
+          公開されたシフトがありません。
         </Notice>
       )}
       {includeDraft && hasDraft && (
         <Notice kind="warning" className="print:hidden">
-          下書きを含んでいます。印刷物には「下書き」の透かしを入れます。配布用は、確定してから「下書きも含める」を外して印刷してください。
+          未公開の割り当てを含んでいます（印刷物に「未公開」の透かしが入ります）。
         </Notice>
       )}
 
-      {/* 印刷物の見出し。確定版か下書きかを紙の上でも分かるようにする */}
+      {/* 印刷物の見出し。公開版か未公開かを紙の上でも分かるようにする */}
       <div className="hidden items-baseline justify-between border-b border-black pb-1 print:flex">
-        <b>高専祭 シフト表（{hasDraft ? '下書き' : '確定版'}）</b>
+        <b>高専祭 シフト表（{hasDraft ? '未公開' : '公開版'}）</b>
         <span className="text-sm">{mdhm(printedAt)} 時点</span>
       </div>
       {hasDraft && (
@@ -180,7 +178,7 @@ export function AdminPrint() {
           className="pointer-events-none fixed inset-0 z-50 hidden items-center justify-center print:flex"
         >
           <span className="-rotate-30 text-9xl font-black tracking-widest text-black/10">
-            下書き
+            未公開
           </span>
         </div>
       )}

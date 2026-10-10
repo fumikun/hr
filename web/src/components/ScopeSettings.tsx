@@ -12,15 +12,9 @@ import {
 import { ErrorAlert, Notice } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -62,18 +56,12 @@ const PHASE_LABEL = {
 } as const;
 
 /** 調整の対象日。対象は塗りつぶし、対象外は薄く表示する */
+/** 対象日を文字で示す。すべての日なら「全日」 */
 function DayChips({ eventDays, days }: { eventDays: string[]; days: string[] }) {
+  const on = eventDays.filter((d) => days.includes(d));
   return (
-    <span className="flex flex-wrap gap-1">
-      {eventDays.map((d) => (
-        <Badge
-          key={d}
-          variant={days.includes(d) ? 'default' : 'outline'}
-          className={cn(!days.includes(d) && 'opacity-50 line-through')}
-        >
-          {md(d)}
-        </Badge>
-      ))}
+    <span className="text-sm">
+      {on.length === 0 ? 'なし' : on.length === eventDays.length ? '全日' : on.map(md).join('・')}
     </span>
   );
 }
@@ -101,7 +89,7 @@ function ScopeDialog({
 }) {
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
         {target && (
           <ScopeForm
             key={`${target.type}-${target.id}`}
@@ -163,9 +151,6 @@ function ScopeForm({
     <form className="space-y-5" onSubmit={submit}>
       <DialogHeader>
         <DialogTitle>{target.name} の受付期間と対象日</DialogTitle>
-        <DialogDescription>
-          個別に設定しない項目は、{target.parent.label}を使います。
-        </DialogDescription>
       </DialogHeader>
 
       <fieldset className="space-y-2">
@@ -305,15 +290,10 @@ function EventDaysCard({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">調整する日程</CardTitle>
-        <CardDescription>
-          シフト調整の対象にできる日です。部門・持ち場ごとに、このうちのどの日を対象にするか（両日か片方だけか）を選べます。
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {!saved && (
-          <Notice kind="warning">
-            日程がまだ登録されていません。作成済みの枠がある日を仮の日程として使っています。登録しておくと、枠がない日も選べます。
-          </Notice>
+          <Notice kind="warning">日程が未登録です（枠のある日を仮に使っています）。</Notice>
         )}
         <ul className="flex flex-wrap gap-2">
           {list.map((d) => (
@@ -381,6 +361,13 @@ export function ScopeSettings({
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<Target | null>(null);
+  // 持ち場は、個別の設定があるものだけ最初に出す（ほとんどは部門の設定をそのまま使うため）
+  const [allPosts, setAllPosts] = useState(false);
+  const ownPost = (id: number) => {
+    const r = data.posts.find((x) => x.id === id);
+    return !!r && (r.periodFrom === 'post' || r.daysFrom === 'post');
+  };
+  const hiddenPosts = posts.filter((p) => !ownPost(p.id)).length;
   const raw = (type: ScopeType, id: number) =>
     data.scopes.find((s) => s.type === type && s.id === id);
   const deptRes = (id: number) => data.departments.find((d) => d.id === id)!;
@@ -395,11 +382,11 @@ export function ScopeSettings({
     const p = phase(r);
     return (
       <TableRow key={`${target.type}-${target.id}`}>
-        <TableCell className={cn(indent && 'pl-8')}>
+        <TableCell data-primary className={cn(indent && 'sm:pl-8')}>
           {indent && <span className="text-muted-foreground mr-1">└</span>}
           <span className={cn(!indent && 'font-medium')}>{name}</span>
         </TableCell>
-        <TableCell className="whitespace-normal">
+        <TableCell data-label="受付期間" className="whitespace-normal">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={p === 'open' ? 'default' : 'secondary'}>{PHASE_LABEL[p]}</Badge>
             <span className="text-sm">
@@ -408,11 +395,11 @@ export function ScopeSettings({
           </div>
           <span className="text-muted-foreground text-xs">{LEVEL[r.periodFrom]}</span>
         </TableCell>
-        <TableCell>
+        <TableCell data-label="対象日">
           <DayChips eventDays={data.eventDays} days={r.days} />
           <span className="text-muted-foreground text-xs">{LEVEL[r.daysFrom]}</span>
         </TableCell>
-        <TableCell className="text-right">
+        <TableCell data-actions className="text-right">
           <Button size="sm" variant="outline" onClick={() => setEditing(target)}>
             設定
           </Button>
@@ -430,8 +417,20 @@ export function ScopeSettings({
         saved={data.eventDaysSaved}
         onSaved={onChanged}
       />
+      {hiddenPosts > 0 && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="all-posts"
+            checked={allPosts}
+            onCheckedChange={(v) => setAllPosts(v === true)}
+          />
+          <Label htmlFor="all-posts" className="font-normal">
+            部門の設定をそのまま使っている持ち場も表示する（{hiddenPosts} 件）
+          </Label>
+        </div>
+      )}
       <div className="bg-card rounded-lg border">
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>部門／持ち場</TableHead>
@@ -451,7 +450,7 @@ export function ScopeSettings({
                   parent: globalParent,
                 }),
                 ...posts
-                  .filter((p) => p.departmentId === d.id)
+                  .filter((p) => p.departmentId === d.id && (allPosts || ownPost(p.id)))
                   .map((p) =>
                     row(
                       p.name,
@@ -475,10 +474,6 @@ export function ScopeSettings({
           </TableBody>
         </Table>
       </div>
-      <p className="text-muted-foreground text-xs">
-        持ち場の設定 → 部門の設定 →
-        全体の設定の順に、設定のあるものが使われます。対象日でない日の枠は、自動割り当てにも、希望入力の画面にも出ません。
-      </p>
       <ScopeDialog
         target={editing}
         setting={editing ? raw(editing.type, editing.id) : undefined}

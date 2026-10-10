@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLoaderData } from 'react-router';
-import { auditApi, type AdminUser, type AuditRow } from '../api';
+import { auditApi, type AuditRow } from '../api';
 import { ACTION } from '../lib/auditLabels';
 import { diffRows } from '../lib/auditDiff';
 import { ErrorAlert, Page } from '@/components/Page';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -24,7 +23,7 @@ import {
 import { fmtDateTime } from '@/lib/datetime';
 import { useAction } from '@/lib/useAction';
 
-export type AdminAuditData = { rows: AuditRow[]; users: AdminUser[] };
+export type AdminAuditData = { rows: AuditRow[] };
 
 // 操作の種類（先頭一致で絞り込む）
 const KINDS: [string, string][] = [
@@ -34,7 +33,7 @@ const KINDS: [string, string][] = [
   ['post.', '持ち場'],
   ['availability.', '希望入力'],
   ['settings.', '設定'],
-  ['assign.', '割り当て・確定'],
+  ['assign.', '割り当て・公開'],
 ];
 const PAGE = 50;
 
@@ -62,23 +61,14 @@ function Changes({ row }: { row: AuditRow }) {
 }
 
 export function AdminAudit() {
-  const { rows: first, users } = useLoaderData<AdminAuditData>();
+  const { rows: first } = useLoaderData<AdminAuditData>();
   const [rows, setRows] = useState(first);
   const [done, setDone] = useState(first.length < PAGE);
-  const [actor, setActor] = useState('all');
   const [kind, setKind] = useState('all');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const { run, pending, error } = useAction();
   const firstRender = useRef(true);
 
-  const query = () => ({
-    actor: actor === 'all' ? undefined : Number(actor),
-    action: kind === 'all' ? undefined : kind,
-    from: from ? new Date(`${from}T00:00`).toISOString() : undefined,
-    // 終了日はその日の終わりまで含める
-    to: to ? new Date(new Date(`${to}T00:00`).getTime() + 86_400_000).toISOString() : undefined,
-  });
+  const query = () => ({ action: kind === 'all' ? undefined : kind });
 
   // 絞り込み条件が変わったら、先頭から取得し直す
   useEffect(() => {
@@ -92,9 +82,9 @@ export function AdminAudit() {
         setDone(r.length < PAGE);
       },
     });
-    // query() は actor/kind/from/to から作るため、これらの変化だけを見る
+    // query() は kind から作るため、kind の変化だけを見る
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actor, kind, from, to]);
+  }, [kind]);
 
   const more = () =>
     run(() => auditApi.list({ ...query(), before: rows[rows.length - 1]?.id }), {
@@ -107,63 +97,21 @@ export function AdminAudit() {
   return (
     <Page wide>
       <h1 className="text-2xl font-bold">操作履歴</h1>
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={actor} onValueChange={setActor}>
-          <SelectTrigger className="w-40" aria-label="操作した人">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">すべての人</SelectItem>
-            {users
-              .filter((u) => u.isAdmin)
-              .map((u) => (
-                <SelectItem key={u.id} value={String(u.id)}>
-                  {u.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
-        <Select value={kind} onValueChange={setKind}>
-          <SelectTrigger className="w-44" aria-label="操作の種類">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">すべての操作</SelectItem>
-            {KINDS.map(([k, label]) => (
-              <SelectItem key={k} value={k}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <label className="flex items-center gap-1 text-sm">
-          期間
-          <Input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="w-40"
-          />
-          〜
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" />
-        </label>
-        {(actor !== 'all' || kind !== 'all' || from || to) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setActor('all');
-              setKind('all');
-              setFrom('');
-              setTo('');
-            }}
-          >
-            絞り込みを解除
-          </Button>
-        )}
-      </div>
+      <Select value={kind} onValueChange={setKind}>
+        <SelectTrigger className="w-full sm:w-44" aria-label="操作の種類">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">すべての操作</SelectItem>
+          {KINDS.map(([k, label]) => (
+            <SelectItem key={k} value={k}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div className="bg-card overflow-x-auto rounded-lg border">
-        <Table>
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>日時</TableHead>
@@ -176,11 +124,15 @@ export function AdminAudit() {
           <TableBody>
             {rows.map((r) => (
               <TableRow key={r.id}>
-                <TableCell className="whitespace-nowrap">{fmtDateTime(r.createdAt)}</TableCell>
-                <TableCell>{r.actorName ?? '（削除済み）'}</TableCell>
-                <TableCell>{ACTION[r.action] ?? r.action}</TableCell>
-                <TableCell className="text-muted-foreground">{r.target}</TableCell>
-                <TableCell className="max-w-md whitespace-normal">
+                <TableCell data-label="日時" className="whitespace-nowrap">
+                  {fmtDateTime(r.createdAt)}
+                </TableCell>
+                <TableCell data-label="操作者">{r.actorName ?? '（削除済み）'}</TableCell>
+                <TableCell data-label="操作">{ACTION[r.action] ?? r.action}</TableCell>
+                <TableCell data-label="対象" className="text-muted-foreground">
+                  {r.target}
+                </TableCell>
+                <TableCell data-label="変更内容" className="max-w-md whitespace-normal">
                   <Changes row={r} />
                 </TableCell>
               </TableRow>

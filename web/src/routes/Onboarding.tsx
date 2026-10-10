@@ -26,13 +26,10 @@ export function Onboarding() {
         <CardContent className="space-y-4">
           {none ? (
             <p className="text-sm">
-              あなたにシフト希望の入力が必要な役職はありません。確定したシフトは「自分のシフト」で確認できます。
+              あなたにシフト希望の入力が必要な役職はありません。公開したシフトは「自分のシフト」で確認できます。
             </p>
           ) : (
             <>
-              <p className="text-muted-foreground text-sm">
-                次の役職は、シフト希望の入力が必要です。内容を確認してください。
-              </p>
               <ul className="list-disc pl-5">
                 {roles.map((r) => (
                   <li key={r.departmentId}>{r.name}</li>

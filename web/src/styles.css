@@ -56,6 +56,34 @@
   }
   body {
     @apply bg-muted/40 text-foreground;
+    /* 日本語は文節の途中で折り返さない（未対応のブラウザでは通常の折り返し） */
+    word-break: auto-phrase;
+    line-break: strict;
+    overflow-wrap: anywhere;
+  }
+  /* 見出し・ラベルは行の長さをそろえ、文章は最後の行に1〜2文字だけ残らないようにする */
+  h1,
+  h2,
+  h3,
+  [data-slot='card-title'],
+  [data-slot='alert-title'],
+  [data-slot='dialog-title'],
+  summary,
+  label {
+    text-wrap: balance;
+  }
+  p,
+  li,
+  [data-slot='card-description'],
+  [data-slot='alert-description'],
+  [data-slot='dialog-description'] {
+    text-wrap: pretty;
+  }
+  /* タブ・表の見出しは、途中で折り返さない */
+  [role='tab'],
+  th {
+    word-break: keep-all;
+    overflow-wrap: normal;
   }
 }
 
@@ -65,5 +93,55 @@
   }
   @page {
     margin: 12mm;
+  }
+}
+
+/* Table の stack: スマホでは行ごとのカードにする（ui/table.tsx） */
+@media (width < 40rem) {
+  .stack-table table,
+  .stack-table tbody,
+  .stack-table tr,
+  .stack-table td {
+    display: block;
+    width: 100%;
+  }
+  .stack-table thead {
+    display: none;
+  }
+  .stack-table tr {
+    padding: 0.5rem 0.75rem;
+  }
+  .stack-table td {
+    padding: 0.125rem 0;
+    white-space: normal;
+    text-align: left;
+  }
+  .stack-table td[data-label] {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    width: 5.5rem;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+  /* 見出しを出さない先頭のセル（氏名など）は、カードのタイトルとして太字にする */
+  .stack-table td[data-primary] {
+    font-weight: 600;
+    padding-bottom: 0.25rem;
+  }
+  /* 操作ボタンのセルは、カードの下に横並びで置く */
+  .stack-table td[data-actions] {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+  }
+  .stack-table td[data-actions] > * {
+    margin: 0 !important;
   }
 }

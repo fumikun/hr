@@ -18,8 +18,8 @@ export const ACTION: Record<string, string> = {
   'assign.run': '自動割り当て',
   'assign.add': '割り当てを追加',
   'assign.remove': '割り当てを削除',
-  'assign.lock': '割り当てを固定',
-  'assign.unlock': '固定を解除',
-  'assign.confirm': 'シフトを確定',
-  'assign.unconfirm': '確定を解除',
+  'assign.lock': '割り当てをピン留め',
+  'assign.unlock': 'ピン留めを解除',
+  'assign.confirm': 'シフトを公開',
+  'assign.unconfirm': '公開を解除',
 };

@@ -21,33 +21,15 @@ export function MyShifts() {
     <Page>
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">自分のシフト</h1>
-        {shifts.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => downloadText('my-shifts.ics', buildIcs(shifts), 'text/calendar')}
-          >
-            <CalendarPlus className="size-4" aria-hidden />
-            カレンダーに追加
-          </Button>
-        )}
       </div>
       {shifts.length === 0 ? (
-        <Notice kind="info">
-          確定したシフトはまだありません。確定されるとここに表示されます。
-        </Notice>
+        <Notice kind="info">公開されたシフトはまだありません。</Notice>
       ) : (
         <>
           <p className="text-muted-foreground text-sm">
             合計 {shifts.length} 枠 ／ {hoursLabel(totalMin)}
             {publishedAt && ` 最終更新: ${mdhm(publishedAt)}`}
           </p>
-          {next && (
-            <Notice kind="info" title="次のシフト">
-              {md(next.startsAt)} {hm(next.startsAt)}–{hm(next.endsAt)} {next.department}（
-              {next.post}）
-            </Notice>
-          )}
           {days.map((day) => (
             <Card key={day} className="gap-2 py-4">
               <CardHeader className="px-4">
@@ -61,14 +43,13 @@ export function MyShifts() {
                       <li
                         key={s.slotId}
                         className={cn(
-                          'flex items-center justify-between py-2',
+                          'flex items-center justify-between gap-3 py-2',
                           isPast(s) && 'opacity-50',
                         )}
                       >
-                        <span className="flex items-center gap-2 text-lg font-medium tabular-nums">
+                        <span className="flex shrink-0 items-center gap-2 text-lg font-medium tabular-nums">
                           {hm(s.startsAt)}–{hm(s.endsAt)}
                           {s === next && <Badge>次</Badge>}
-                          {isPast(s) && <Badge variant="outline">終了</Badge>}
                         </span>
                         <span className="text-right text-sm">
                           {s.department}
@@ -80,6 +61,16 @@ export function MyShifts() {
               </CardContent>
             </Card>
           ))}
+          {shifts.length > 0 && (
+            <Button
+              variant="outline"
+              className="w-full sm:w-fit"
+              onClick={() => downloadText('my-shifts.ics', buildIcs(shifts), 'text/calendar')}
+            >
+              <CalendarPlus className="size-4" aria-hidden />
+              カレンダーに追加
+            </Button>
+          )}
         </>
       )}
     </Page>

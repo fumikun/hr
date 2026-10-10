@@ -1,5 +1,4 @@
-import { Lock, LockOpen } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useLoaderData, useRevalidator } from 'react-router';
 import { toast } from 'sonner';
 import {
@@ -15,11 +14,12 @@ import {
   type Slot,
   type ViolationReason,
 } from '../api';
+import { AssignTimetable, SlotPanel } from '@/components/AssignTimetable';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { ErrorAlert, Notice, Page } from '@/components/Page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -30,15 +30,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { dateKey, fmtDateTime, hm, hoursLabel, md, mdRange, minutesBetween } from '@/lib/datetime';
+import { dateKey, fmtDateTime, hoursLabel, md, mdRange, minutesBetween } from '@/lib/datetime';
 import { withLock, withoutPair, withPair } from '@/lib/assignLocal';
 import { useAction } from '@/lib/useAction';
 import { useQueryParam, useSetQueryParams } from '@/lib/useQueryParam';
@@ -60,6 +53,9 @@ const REASON: Record<ViolationReason, string> = {
   post_restricted: '持ち場の対象外',
   over_capacity: '定員超過',
 };
+/** 自動割り当ての計算時間の上限（秒）。管理者が選ぶ根拠がないので固定にする */
+const RUN_LIMIT_SECONDS = 60;
+
 const PHASE: Record<string, string> = {
   queued: '準備中',
   loading: 'データを読み込み中',
@@ -70,7 +66,6 @@ const PHASE: Record<string, string> = {
 function RunPanel({ run, onFinished }: { run: AssignRun | null; onFinished: () => void }) {
   const confirm = useConfirm();
   const [current, setCurrent] = useState(run);
-  const [limit, setLimit] = useState('60');
   const [now, setNow] = useState(Date.now());
   const { run: act, pending, error } = useAction();
   const running = current?.status === 'running';
@@ -95,42 +90,26 @@ function RunPanel({ run, onFinished }: { run: AssignRun | null; onFinished: () =
     const ok = await confirm({
       title: '自動割り当てを実行しますか？',
       description:
-        '固定されていない現在の下書き（前回の自動割り当てなど）は置き換えられます。固定した割り当てと確定済みの割り当ては維持されます。',
+        'ピン留めされていない現在の未公開の割り当て（前回の自動割り当てなど）は置き換えられます。ピン留めした割り当てと公開済みの割り当ては維持されます。',
       confirmLabel: '実行する',
     });
     if (!ok) return;
-    await act(() => assignApi.run(Number(limit)), { onSuccess: setCurrent });
+    await act(() => assignApi.run(RUN_LIMIT_SECONDS), { onSuccess: setCurrent });
   }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>① 自動割り当て</CardTitle>
-        <CardDescription>
-          希望入力（入れない時間帯・入りたい時間帯）、持ち場の対象者、目標/上限の勤務時間をもとに案を作ります。条件を満たせない枠は止まらずに「不足」として出ます。
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-sm">
-            <Label htmlFor="limit">計算時間の上限</Label>
-            <Select value={limit} onValueChange={setLimit} disabled={running}>
-              <SelectTrigger id="limit" className="w-24">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[30, 60, 120, 300].map((s) => (
-                  <SelectItem key={s} value={String(s)}>
-                    {s}秒
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button disabled={running || pending} onClick={() => void start()}>
-            {running ? '実行中…' : '自動割り当てを実行'}
-          </Button>
-        </div>
+        <Button
+          className="w-full sm:w-fit"
+          disabled={running || pending}
+          onClick={() => void start()}
+        >
+          {running ? '実行中…' : '自動割り当てを実行'}
+        </Button>
         {running && current && (
           <p className="text-sm" role="status">
             {PHASE[current.phase] ?? current.phase}… 経過{' '}
@@ -206,7 +185,7 @@ function AddDialog({
       warn &&
       !(await confirm({
         title: '警告があります',
-        description: 'それでも追加しますか？（追加すると固定されます）',
+        description: 'それでも追加しますか？（追加するとピン留めされます）',
         confirmLabel: '追加する',
       }))
     )
@@ -234,7 +213,6 @@ function AddDialog({
           <DialogDescription>
             {slot && mdRange(slot.startsAt, slot.endsAt)} 現在 {assigned.length}/{slot?.minPeople}〜
             {slot?.maxPeople}人{need > 0 ? `（あと ${need} 人必要）` : '（必要人数に達しました）'}
-            。手動で追加した人は「固定」され、再実行しても維持されます。
           </DialogDescription>
         </DialogHeader>
         <Input
@@ -307,14 +285,14 @@ function PublishBar({
 
   async function publish() {
     const ok = await confirm({
-      title: `下書き ${drafts} 件を確定して公開しますか？`,
+      title: `未公開 ${drafts} 件を公開しますか？`,
       description:
-        '確定すると、一般ユーザーが「自分のシフト」で見られるようになります。確定後も「確定を解除」で下書きに戻せます。',
-      confirmLabel: '確定して公開',
+        '公開すると、一般ユーザーが「自分のシフト」で見られるようになります。公開後も「公開を解除」で未公開に戻せます。',
+      confirmLabel: '公開',
       content:
         assign.shortages.length > 0 || assign.violations.length > 0 ? (
           <Notice kind="warning" title="未解決の項目があります">
-            {assign.violations.length > 0 && <p>制約違反の警告 {assign.violations.length} 件</p>}
+            {assign.violations.length > 0 && <p>要確認 {assign.violations.length} 件</p>}
             {assign.shortages.length > 0 && (
               <>
                 <p>
@@ -339,28 +317,26 @@ function PublishBar({
         ) : undefined,
     });
     if (ok)
-      await run(confirmApi.confirm, { success: 'シフトを確定しました', onSuccess: onChanged });
+      await run(confirmApi.confirm, { success: 'シフトを公開しました', onSuccess: onChanged });
   }
   async function unpublish() {
     const ok = await confirm({
-      title: '確定を解除しますか？',
+      title: '公開を解除しますか？',
       description: '一般ユーザーからシフトが見えなくなります。',
-      confirmLabel: '確定を解除',
+      confirmLabel: '公開を解除',
       destructive: true,
     });
     if (ok)
-      await run(confirmApi.unconfirm, { success: '確定を解除しました', onSuccess: onChanged });
+      await run(confirmApi.unconfirm, { success: '公開を解除しました', onSuccess: onChanged });
   }
 
   return (
-    <div className="bg-background sticky bottom-0 z-20 -mx-4 space-y-2 border-t px-4 py-3">
+    <div className="bg-background sticky bottom-0 z-20 -mx-4 space-y-2 border-t px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:py-3">
       {confirmed > 0 && drafts > 0 && (
-        <Notice kind="warning">
-          公開済みのシフトに対して、まだ公開していない変更が {drafts}{' '}
-          件あります。確定すると反映されます。
-        </Notice>
+        <Notice kind="warning">未公開の変更が {drafts} 件あります。</Notice>
       )}
       {error && <ErrorAlert>{error}</ErrorAlert>}
+      {/* スマホでは2行（状況／ボタン）に収め、画面を覆う高さを抑える */}
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={assign.shortages.length > 0 ? 'destructive' : 'secondary'}>
           不足 {assign.shortages.length} 枠（{shortagePeople}人）
@@ -368,19 +344,17 @@ function PublishBar({
         <Badge variant={assign.violations.length > 0 ? 'destructive' : 'secondary'}>
           警告 {assign.violations.length} 件
         </Badge>
-        <span className="text-muted-foreground text-sm">
-          下書き {drafts} ／ 確定済み {confirmed}
-        </span>
-        <div className="ml-auto flex gap-2">
+        <span className="text-muted-foreground text-xs sm:text-sm">公開済み {confirmed}</span>
+        <div className="grid w-full grid-cols-[auto_1fr] gap-2 sm:ml-auto sm:flex sm:w-auto">
           <Button
             variant="outline"
             disabled={confirmed === 0 || pending}
             onClick={() => void unpublish()}
           >
-            確定を解除
+            公開を解除
           </Button>
           <Button disabled={drafts === 0 || pending} onClick={() => void publish()}>
-            ② 下書きを確定して公開
+            ② 未公開 {drafts} 件を公開
           </Button>
         </div>
       </div>
@@ -418,14 +392,12 @@ export function AdminAssign() {
   const [dayParam, setDay] = useQueryParam('day');
   const setQuery = useSetQueryParams();
   const [viewParam, setView] = useQueryParam('view');
-  const [issuesParam, setIssues] = useQueryParam('issues');
   const [adding, setAdding] = useState<number | null>(null);
   const [personQuery, setPersonQuery] = useState('');
   const [shortOnly, setShortOnly] = useState(false);
   const [openPerson, setOpenPerson] = useState<number | null>(null);
 
   const view = viewParam === 'people' ? 'people' : 'slots';
-  const issuesOnly = issuesParam === '1';
   const deptId = departments.find((d) => String(d.id) === deptParam)?.id ?? departments[0]?.id ?? 0;
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
@@ -445,8 +417,6 @@ export function AdminAssign() {
     assign.violations.filter((v) => v.userId === userId && v.slotId === slotId);
   const missingOf = (slotId: number) =>
     assign.shortages.find((s) => s.slotId === slotId)?.missing ?? 0;
-  const hasIssue = (slotId: number) =>
-    missingOf(slotId) > 0 || assign.violations.some((v) => v.slotId === slotId);
 
   const deptPosts = posts.filter((p) => p.departmentId === deptId);
   const deptSlots = slots.filter((s) => s.departmentId === deptId);
@@ -460,6 +430,51 @@ export function AdminAssign() {
       })
       .reduce((n, s) => n + s.missing, 0);
 
+  const daySlots = deptSlots.filter((x) => dateKey(x.startsAt) === currentDay);
+
+  const [selected, setSelected] = useState<number | null>(null);
+  const selectedSlot = selected === null ? null : (slotById.get(selected) ?? null);
+  const shortSlots = slots
+    .filter((x) => missingOf(x.id) > 0)
+    .sort((x, y) => x.startsAt.localeCompare(y.startsAt) || x.id - y.id);
+  // 次の不足へ: 選んでいる枠より後ろの不足から順に。最後まで行ったら先頭に戻る
+  function gotoNextShortage() {
+    if (shortSlots.length === 0) return;
+    const cur = selectedSlot;
+    const next =
+      shortSlots.find(
+        (x) => cur && (x.startsAt > cur.startsAt || (x.startsAt === cur.startsAt && x.id > cur.id)),
+      ) ?? shortSlots[0]!;
+    setQuery({ dept: String(next.departmentId), day: dateKey(next.startsAt) });
+    setSelected(next.id);
+  }
+
+  async function addTo(userId: number, slotId: number) {
+    setAssign((prev) => withPair(prev, slots, userId, slotId));
+    const res = await act(() => assignApi.add(userId, slotId), {
+      onSuccess: (r) => {
+        if (r.warnings.length > 0)
+          toast.warning(
+            `追加しました（要確認: ${r.warnings.map((w) => REASON[w.reason]).join('、')}）`,
+          );
+      },
+    });
+    reconcile();
+    return res.ok;
+  }
+
+  /** 別の枠へ移す。先に移動先へ追加してから外すので、途中で失敗しても人が消えない */
+  async function move(userId: number, from: number, to: number) {
+    const name = userById.get(userId)?.name ?? '';
+    if (!(await addTo(userId, to))) return;
+    setAssign((prev) => withoutPair(prev, slots, userId, from));
+    const res = await act(() => assignApi.remove(userId, from), {
+      success: `${name}さんを移しました`,
+    });
+    if (!res.ok) reconcile();
+    setSelected(to);
+  }
+
   const addingSlot = adding === null ? null : (slotById.get(adding) ?? null);
 
   async function remove(userId: number, slotId: number) {
@@ -468,8 +483,7 @@ export function AdminAssign() {
     if (row?.status === 'confirmed') {
       const ok = await confirm({
         title: `${name}さんを外しますか？`,
-        description:
-          'この割り当ては確定済み（公開済み）です。外すと、本人の「自分のシフト」からも消えます。',
+        description: 'この割り当ては公開済みです。外すと、本人の「自分のシフト」からも消えます。',
         confirmLabel: '外す',
         destructive: true,
       });
@@ -485,7 +499,7 @@ export function AdminAssign() {
               setAssign((prev) => withPair(prev, slots, userId, slotId));
               void assignApi
                 .add(userId, slotId)
-                .then(() => toast.success('元に戻しました（固定として追加）'))
+                .then(() => toast.success('元に戻しました（ピン留めとして追加）'))
                 .catch((e: Error) => toast.error(e.message))
                 .finally(reconcile);
             },
@@ -495,6 +509,24 @@ export function AdminAssign() {
     });
     if (!res.ok) reconcile(); // 失敗したら、サーバーの状態に戻す
   }
+
+  const slotPanel = (slotId: number, compact = false) => {
+    const slot = slotById.get(slotId);
+    if (!slot) return null;
+    return (
+      <SlotPanel
+        slot={slot}
+        postName={posts.find((p) => p.id === slot.postId)?.name ?? ''}
+        assigned={assign.assignments.filter((x) => x.slotId === slot.id).map((x) => x.userId)}
+        users={users}
+        missing={missingOf(slot.id)}
+        disabled={pending}
+        onAdd={(u) => void addTo(u, slot.id)}
+        onPick={() => setAdding(slot.id)}
+        compact={compact}
+      />
+    );
+  };
 
   const visiblePeople = users
     .filter((u) => u.name.includes(personQuery) || u.email.includes(personQuery))
@@ -525,11 +557,11 @@ export function AdminAssign() {
               setQuery({ dept: v, day: null });
             }}
           >
-            <TabsList className="h-auto flex-wrap justify-start">
+            <TabsList className="h-auto! w-full flex-wrap justify-start gap-1">
               {departments.map((d) => {
                 const n = shortOf((s) => s.departmentId === d.id);
                 return (
-                  <TabsTrigger key={d.id} value={String(d.id)} className="gap-1.5">
+                  <TabsTrigger key={d.id} value={String(d.id)} className="h-8 flex-none gap-1.5">
                     {d.name}
                     {n > 0 && <Badge variant="destructive">不足 {n}</Badge>}
                   </TabsTrigger>
@@ -538,12 +570,12 @@ export function AdminAssign() {
             </TabsList>
           </Tabs>
           <div className="flex flex-wrap items-center gap-3">
-            <Tabs value={currentDay} onValueChange={setDay}>
-              <TabsList className="h-auto flex-wrap justify-start">
+            <Tabs value={currentDay} onValueChange={setDay} className="max-w-full min-w-0">
+              <TabsList className="h-auto! w-full flex-wrap justify-start gap-1">
                 {days.map((d) => {
                   const n = shortOf((s) => s.departmentId === deptId && dateKey(s.startsAt) === d);
                   return (
-                    <TabsTrigger key={d} value={d} className="gap-1.5">
+                    <TabsTrigger key={d} value={d} className="h-8 flex-none gap-1.5">
                       {md(d)}
                       {n > 0 && <Badge variant="destructive">不足 {n}</Badge>}
                     </TabsTrigger>
@@ -551,152 +583,39 @@ export function AdminAssign() {
                 })}
               </TabsList>
             </Tabs>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="issues"
-                checked={issuesOnly}
-                onCheckedChange={(v) => setIssues(v === true ? '1' : null)}
-              />
-              <Label htmlFor="issues">不足・警告のある枠だけ表示</Label>
-            </div>
-          </div>
-          {days.length === 0 && (
-            <Notice kind="info">
-              この部門にはまだ枠がありません。「枠・持ち場」で作成してください。
-            </Notice>
-          )}
-          {deptPosts.map((post) => {
-            const row = deptSlots
-              .filter((s) => s.postId === post.id && dateKey(s.startsAt) === currentDay)
-              .filter((s) => !issuesOnly || hasIssue(s.id))
-              .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-            if (row.length === 0) return null;
-            return (
-              <section key={post.id} className="space-y-2">
-                <h3 className="font-semibold">
-                  {post.name}
-                  <span className="text-muted-foreground ml-2 text-xs font-normal">
-                    {post.restricted ? `限定 ${post.memberIds.length}人` : '部門の誰でも'}
-                  </span>
-                </h3>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {row.map((s) => {
-                    const people = assign.assignments.filter((a) => a.slotId === s.id);
-                    const missing = missingOf(s.id);
-                    return (
-                      <Card
-                        key={s.id}
-                        className={cn('gap-2 py-3', missing > 0 && 'border-red-400')}
-                      >
-                        <CardHeader className="px-4">
-                          <CardTitle className="flex items-center justify-between text-base">
-                            <span>
-                              {hm(s.startsAt)}–{hm(s.endsAt)}
-                            </span>
-                            <span className="text-muted-foreground text-xs font-normal">
-                              {people.length}/{s.minPeople}〜{s.maxPeople}人
-                            </span>
-                          </CardTitle>
-                          {missing > 0 && (
-                            <Badge variant="destructive" className="w-fit">
-                              ⚠ あと {missing} 人必要
-                            </Badge>
-                          )}
-                        </CardHeader>
-                        <CardContent className="space-y-2 px-4">
-                          <ul className="space-y-1">
-                            {people.map((a) => {
-                              const vs = violationsOf(a.userId, s.id);
-                              const name = userById.get(a.userId)?.name ?? '?';
-                              return (
-                                <li
-                                  key={a.userId}
-                                  className={cn(
-                                    'flex items-center justify-between gap-1 rounded border px-2 py-1 text-sm',
-                                    vs.length > 0 && 'border-red-300 bg-red-50',
-                                  )}
-                                >
-                                  <span className="min-w-0">
-                                    <span className="truncate">{name}</span>
-                                    {a.status === 'confirmed' && (
-                                      <Badge variant="secondary" className="ml-1">
-                                        確定
-                                      </Badge>
-                                    )}
-                                    {a.source === 'manual' && (
-                                      <span className="text-muted-foreground ml-1 text-xs">
-                                        手動
-                                      </span>
-                                    )}
-                                    {vs.map((v) => (
-                                      <Badge key={v.reason} variant="destructive" className="ml-1">
-                                        ⚠ {REASON[v.reason]}
-                                      </Badge>
-                                    ))}
-                                  </span>
-                                  <span className="flex shrink-0 items-center gap-0.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className={cn('size-7', a.locked && 'text-amber-600')}
-                                      aria-pressed={a.locked}
-                                      aria-label={
-                                        a.locked
-                                          ? `${name}さんの固定を解除`
-                                          : `${name}さんを固定（再実行しても動かさない）`
-                                      }
-                                      title={
-                                        a.locked
-                                          ? '固定中：再実行しても動きません（クリックで解除）'
-                                          : 'クリックで固定：再実行しても動かさない'
-                                      }
-                                      disabled={pending}
-                                      onClick={() => {
-                                        setAssign((prev) =>
-                                          withLock(prev, a.userId, s.id, !a.locked),
-                                        );
-                                        void act(() =>
-                                          assignApi.setLocked(a.userId, s.id, !a.locked),
-                                        ).then((r) => !r.ok && reconcile());
-                                      }}
-                                    >
-                                      {a.locked ? (
-                                        <Lock className="size-4" />
-                                      ) : (
-                                        <LockOpen className="size-4" />
-                                      )}
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="hover:text-destructive size-7"
-                                      aria-label={`${name}さんを外す`}
-                                      disabled={pending}
-                                      onClick={() => void remove(a.userId, s.id)}
-                                    >
-                                      ×
-                                    </Button>
-                                  </span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                          <Button size="sm" variant="outline" onClick={() => setAdding(s.id)}>
-                            ＋ 人を追加
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
-          {issuesOnly &&
-            currentDay &&
-            !deptSlots.some((s) => dateKey(s.startsAt) === currentDay && hasIssue(s.id)) && (
-              <Notice kind="info">この日に不足・警告のある枠はありません。</Notice>
+            {shortSlots.length > 0 && (
+              <Button size="sm" variant="outline" onClick={gotoNextShortage}>
+                次の不足へ →（残り {shortSlots.length} 枠）
+              </Button>
             )}
+          </div>
+          {days.length === 0 && <Notice kind="info">この部門にはまだ枠がありません。</Notice>}
+          {daySlots.length > 0 && (
+            <AssignTimetable
+              posts={deptPosts}
+              slots={daySlots}
+              assignments={assign.assignments}
+              userById={userById}
+              missingOf={missingOf}
+              warningsOf={(u, sid) => violationsOf(u, sid).map((v) => REASON[v.reason])}
+              selected={selected}
+              disabled={pending}
+              onSelect={setSelected}
+              onMove={(u, from, to) => void move(u, from, to)}
+              onRemove={(u, sid) => void remove(u, sid)}
+              renderPanel={slotPanel}
+              onToggleLock={(a) => {
+                setAssign((prev) => withLock(prev, a.userId, a.slotId, !a.locked));
+                void act(() => assignApi.setLocked(a.userId, a.slotId, !a.locked)).then(
+                  (r) => !r.ok && reconcile(),
+                );
+              }}
+            />
+          )}
+          {/* スマホでは一覧の中（選んだ枠の下）に出すので、ここでは sm 以上だけ */}
+          {selectedSlot && selectedSlot.departmentId === deptId && (
+            <div className="hidden sm:block">{slotPanel(selectedSlot.id)}</div>
+          )}
         </>
       ) : (
         <>
@@ -705,7 +624,7 @@ export function AdminAssign() {
               placeholder="名前・メールで検索"
               value={personQuery}
               onChange={(e) => setPersonQuery(e.target.value)}
-              className="max-w-xs"
+              className="w-full sm:max-w-xs"
             />
             <div className="flex items-center gap-2">
               <Checkbox
@@ -722,8 +641,8 @@ export function AdminAssign() {
                 <tr className="border-b text-left">
                   <th className="p-2">氏名</th>
                   <th className="p-2">割り当て</th>
-                  <th className="p-2">目標</th>
-                  <th className="p-2">上限</th>
+                  <th className="hidden p-2 sm:table-cell">目標</th>
+                  <th className="hidden p-2 sm:table-cell">上限</th>
                   <th className="p-2">状況</th>
                 </tr>
               </thead>
@@ -738,20 +657,23 @@ export function AdminAssign() {
                     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
                   const open = openPerson === u.id;
                   return (
-                    <>
+                    <Fragment key={u.id}>
                       <tr
-                        key={u.id}
                         className="hover:bg-accent/50 cursor-pointer border-b"
                         onClick={() => setOpenPerson(open ? null : u.id)}
                       >
                         <td className="p-2">{u.name}</td>
                         <td className="p-2">
                           {hoursLabel(m)}（{mine.length}枠）
+                          <span className="text-muted-foreground block text-xs sm:hidden">
+                            目標 {u.targetMinutes === null ? '-' : hoursLabel(u.targetMinutes)}
+                            ／上限 {u.maxMinutes === null ? '-' : hoursLabel(u.maxMinutes)}
+                          </span>
                         </td>
-                        <td className="p-2">
+                        <td className="hidden p-2 sm:table-cell">
                           {u.targetMinutes === null ? '-' : hoursLabel(u.targetMinutes)}
                         </td>
-                        <td className="p-2">
+                        <td className="hidden p-2 sm:table-cell">
                           {u.maxMinutes === null ? '-' : hoursLabel(u.maxMinutes)}
                         </td>
                         <td className="p-2">
@@ -783,7 +705,7 @@ export function AdminAssign() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
                 {visiblePeople.length === 0 && (

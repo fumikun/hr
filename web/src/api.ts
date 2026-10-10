@@ -292,7 +292,7 @@ export type AssignData = {
 Object.assign(ERROR_TEXT, {
   already_running: '自動割り当てが実行中です。完了までお待ちください',
   exists: 'すでに割り当てられています',
-  confirmed: '確定済みの割り当ては削除できません',
+  confirmed: '公開済みの割り当ては削除できません',
   unknown_user: 'ユーザーが存在しません',
   unknown_slot: '枠が存在しません',
 });

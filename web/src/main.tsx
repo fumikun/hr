@@ -136,7 +136,7 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            const [period, status, slots, departments, users, assign, run, audit, scopes] =
+            const [period, status, slots, departments, users, assign, run, scopes] =
               await Promise.all([
                 periodApi.get(),
                 periodApi.status(),
@@ -145,7 +145,6 @@ const router = createBrowserRouter([
                 adminApi.users(),
                 assignApi.data(),
                 assignApi.latestRun(),
-                auditApi.list({ limit: 8 }),
                 scopeApi.get(),
               ]);
             return {
@@ -157,7 +156,6 @@ const router = createBrowserRouter([
               users,
               assign,
               run,
-              audit,
             };
           }),
       },
@@ -218,6 +216,34 @@ const router = createBrowserRouter([
           }),
       },
       {
+        path: '/admin/posts',
+        lazy: lazyRoute('AdminPosts'),
+        shouldRevalidate: ignoreSearchChange,
+        loader: () =>
+          guarded(requireAdmin, async () => {
+            const [departments, posts, users] = await Promise.all([
+              adminApi.departments(),
+              postApi.list(),
+              adminApi.users(),
+            ]);
+            return { departments, posts, users };
+          }),
+      },
+      {
+        path: '/admin/posts/:postId',
+        lazy: lazyRoute('AdminPostEdit'),
+        shouldRevalidate: ignoreSearchChange,
+        loader: () =>
+          guarded(requireAdmin, async () => {
+            const [departments, posts, users] = await Promise.all([
+              adminApi.departments(),
+              postApi.list(),
+              adminApi.users(),
+            ]);
+            return { departments, posts, users };
+          }),
+      },
+      {
         path: '/admin/availability',
         lazy: lazyRoute('AdminAvailability'),
         shouldRevalidate: ignoreSearchChange,
@@ -273,8 +299,7 @@ const router = createBrowserRouter([
         shouldRevalidate: ignoreSearchChange,
         loader: () =>
           guarded(requireAdmin, async () => {
-            const [rows, users] = await Promise.all([auditApi.list(), adminApi.users()]);
-            return { rows, users };
+            return { rows: await auditApi.list() };
           }),
       },
     ],

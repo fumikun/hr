@@ -1,22 +1,14 @@
 import { useMemo, useState } from 'react';
-import { postApi, type AdminUser, type Post } from '../api';
+import type { AdminUser } from '../api';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { ErrorAlert } from '@/components/Page';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAction } from '@/lib/useAction';
 
-function PostForm({
+export function PostForm({
   initial,
   candidates,
   save,
@@ -113,9 +105,7 @@ function PostForm({
               表示中を全員選択
             </Button>
           </div>
-          <p className="text-muted-foreground text-xs">
-            選択中 {members.size} 人（この部門の所属者のみ表示）
-          </p>
+          <p className="text-muted-foreground text-xs">選択中 {members.size} 人</p>
           <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
             {shown.map((u) => (
               <li key={u.id} className="flex items-center gap-2">
@@ -152,75 +142,5 @@ function PostForm({
         </Button>
       </div>
     </form>
-  );
-}
-
-export function PostsPanel({
-  departmentId,
-  posts,
-  users,
-  onChanged,
-}: {
-  departmentId: number;
-  posts: Post[];
-  users: AdminUser[];
-  onChanged: () => void;
-}) {
-  const [editing, setEditing] = useState<Post | 'new' | null>(null);
-  const candidates = users.filter((u) => u.roles.some((r) => r.departmentId === departmentId));
-  const done = () => {
-    setEditing(null);
-    onChanged();
-  };
-
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">持ち場</h2>
-        <Button size="sm" variant="outline" onClick={() => setEditing('new')}>
-          持ち場を追加
-        </Button>
-      </div>
-      {posts.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          この部門にはまだ持ち場がありません。枠を作る前に追加してください（持ち場が1つだけの部門も「全体」などの名前で1つ作ります）。
-        </p>
-      ) : (
-        <ul className="flex flex-wrap gap-2">
-          {posts.map((p) => (
-            <li key={p.id}>
-              <Button variant="outline" size="sm" onClick={() => setEditing(p)}>
-                {p.name}
-                <Badge variant={p.restricted ? 'default' : 'secondary'}>
-                  {p.restricted ? `限定 ${p.memberIds.length}人` : '誰でも'}
-                </Badge>
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editing === 'new' ? '持ち場を追加' : '持ち場を編集'}</DialogTitle>
-            <DialogDescription>
-              「一部の人だけ」にすると、選んだ人だけがこの持ち場の枠に割り当てられます。
-            </DialogDescription>
-          </DialogHeader>
-          {editing && (
-            <PostForm
-              key={editing === 'new' ? 'new' : editing.id}
-              initial={editing === 'new' ? { name: '', restricted: false, memberIds: [] } : editing}
-              candidates={candidates}
-              onDone={done}
-              save={(p) =>
-                editing === 'new' ? postApi.create(departmentId, p) : postApi.update(editing.id, p)
-              }
-              remove={editing === 'new' ? undefined : () => postApi.remove(editing.id)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </section>
   );
 }

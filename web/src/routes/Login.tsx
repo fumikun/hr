@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router';
-import { fetchDevUsers, postAuthForm, type DevUser } from '../api';
 import { ErrorAlert, Page } from '@/components/Page';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import { fetchDevUsers, postAuthForm, type DevUser } from '../api';
 
 export function Login() {
   const [params] = useSearchParams();
@@ -25,7 +25,7 @@ export function Login() {
     <Page>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">高専祭 シフト調整</CardTitle>
+          <CardTitle className="text-xl">Kosensai HR</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {error && <ErrorAlert>{errorText}</ErrorAlert>}

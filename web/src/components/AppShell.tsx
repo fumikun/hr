@@ -1,3 +1,6 @@
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
 import {
   Building2,
   CalendarCheck,
@@ -8,6 +11,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   LogOut,
+  MapPin,
   Menu,
   Printer,
   Sparkles,
@@ -18,9 +22,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLoaderData, useLocation, useNavigation } from 'react-router';
 import { postAuthForm, type Me } from '../api';
 import { prefetchRoutes } from '../routes/lazy';
-import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
-import { cn } from '@/lib/utils';
+import { NextStepBar } from './NextStepBar';
 
 type Item = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -29,16 +31,29 @@ const MEMBER: Item[] = [
   { to: '/availability', label: 'シフト希望の入力', icon: CalendarCheck },
   { to: '/shifts', label: '自分のシフト', icon: CalendarDays },
 ];
-const ADMIN: Item[] = [
+const ADMIN_TOP: Item[] = [
   { to: '/admin', label: 'ダッシュボード', icon: LayoutDashboard, end: true },
-  { to: '/admin/users', label: 'ユーザー', icon: Users },
-  { to: '/admin/departments', label: '部門', icon: Building2 },
-  { to: '/admin/slots', label: '枠・持ち場', icon: LayoutGrid },
-  { to: '/admin/availability', label: '希望の受付・状況', icon: ClipboardList },
-  { to: '/admin/assign', label: '割り当て', icon: Sparkles },
-  { to: '/admin/print', label: '印刷・出力', icon: Printer },
-  { to: '/admin/audit', label: '操作履歴', icon: History },
 ];
+// 作業の順番に並べる
+const ADMIN_GROUPS: { title: string; items: Item[] }[] = [
+  {
+    title: '1. 準備する',
+    items: [
+      { to: '/admin/users', label: 'ユーザー', icon: Users },
+      { to: '/admin/departments', label: '部門', icon: Building2 },
+      { to: '/admin/posts', label: '持ち場', icon: MapPin },
+      { to: '/admin/slots', label: '枠', icon: LayoutGrid },
+    ],
+  },
+  {
+    title: '2. 集める',
+    items: [{ to: '/admin/availability', label: '希望の受付・状況', icon: ClipboardList }],
+  },
+  { title: '3. 決める', items: [{ to: '/admin/assign', label: '割り当て', icon: Sparkles }] },
+  { title: '4. 配る', items: [{ to: '/admin/print', label: '印刷・出力', icon: Printer }] },
+  { title: '記録', items: [{ to: '/admin/audit', label: '操作履歴', icon: History }] },
+];
+const ADMIN: Item[] = [...ADMIN_TOP, ...ADMIN_GROUPS.flatMap((g) => g.items)];
 
 function NavGroup({
   title,
@@ -82,11 +97,18 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
   return (
     <div className="flex h-full flex-col gap-6 p-4">
       <div className="px-3">
-        <p className="font-bold">高専祭 シフト調整</p>
+        <p className="font-bold">Kosensai HR</p>
       </div>
       <nav aria-label="メインメニュー" className="flex-1 space-y-6 overflow-y-auto">
         <NavGroup title="メニュー" items={MEMBER} onNavigate={onNavigate} />
-        {me.isAdmin && <NavGroup title="管理者" items={ADMIN} onNavigate={onNavigate} />}
+        {me.isAdmin && (
+          <>
+            <NavGroup title="管理者" items={ADMIN_TOP} onNavigate={onNavigate} />
+            {ADMIN_GROUPS.map((g) => (
+              <NavGroup key={g.title} title={g.title} items={g.items} onNavigate={onNavigate} />
+            ))}
+          </>
+        )}
       </nav>
       <div className="border-t pt-4">
         <p className="truncate px-3 text-sm font-medium">{me.name}</p>
@@ -123,7 +145,7 @@ export function AppShell() {
     const current = [...MEMBER, ...ADMIN]
       .filter((i) => (i.end ? pathname === i.to : pathname.startsWith(i.to)))
       .sort((a, b) => b.to.length - a.to.length)[0];
-    document.title = current ? `${current.label} | 高専祭 シフト調整` : '高専祭 シフト調整';
+    document.title = current ? `${current.label} | Kosensai HR` : 'Kosensai HR';
   }, [pathname]);
 
   return (
@@ -148,7 +170,7 @@ export function AppShell() {
           >
             <Menu className="size-5" />
           </Button>
-          <span className="font-bold">高専祭 シフト調整</span>
+          <span className="font-bold">Kosensai HR</span>
         </header>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent side="left" className="w-72 p-0">
@@ -166,6 +188,7 @@ export function AppShell() {
             loading ? 'animate-pulse opacity-100' : 'opacity-0',
           )}
         />
+        {me.isAdmin && <NextStepBar />}
         <Outlet />
       </div>
     </div>

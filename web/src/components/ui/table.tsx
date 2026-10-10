@@ -3,9 +3,20 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-function Table({ className, ...props }: React.ComponentProps<'table'>) {
+/**
+ * stack: スマホ幅（sm 未満）では、表を行ごとのカードに組み替える。
+ * 見出しはセルの data-label から出す。data-label のないセル（操作ボタンなど）は横いっぱいに置く。
+ */
+function Table({
+  className,
+  stack = false,
+  ...props
+}: React.ComponentProps<'table'> & { stack?: boolean }) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className={cn('relative w-full overflow-x-auto', stack && 'stack-table')}
+    >
       <table
         data-slot="table"
         className={cn('w-full caption-bottom text-sm', className)}
