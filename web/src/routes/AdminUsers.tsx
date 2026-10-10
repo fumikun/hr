@@ -385,6 +385,9 @@ export function AdminUsers() {
   const [editing, setEditing] = useState<AdminUser | 'new' | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [q, setQ] = useQueryParam('q');
+  // IME変換中にURLを書き換えると入力が確定されてしまうため、入力欄は手元のstateで持ち、
+  // 変換が終わってからURL(?q=)へ反映する
+  const [searchText, setSearchText] = useState(q ?? '');
   const [deptParam, setDept] = useQueryParam('dept');
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '?';
   const done = () => {
@@ -422,8 +425,12 @@ export function AdminUsers() {
       <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
         <Input
           placeholder="名前・メールで検索"
-          value={q ?? ''}
-          onChange={(e) => setQ(e.target.value || null)}
+          value={searchText}
+          onChange={(e) => {
+            setSearchText(e.target.value);
+            if (!(e.nativeEvent as InputEvent).isComposing) setQ(e.target.value || null);
+          }}
+          onCompositionEnd={(e) => setQ(e.currentTarget.value || null)}
           className="col-span-2 sm:max-w-xs"
           aria-label="名前・メールで検索"
         />
